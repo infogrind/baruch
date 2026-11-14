@@ -51,7 +51,7 @@ proposing designs.
 - Data sources: `/volume1/archive` (~17.1 TiB, tv 9.1 TiB, movies 7.5 TiB),
   `/volume1/homes/alex`, `/volume1/projects`. Full `du` over ssh is very slow.
   All sizes are binary units (TiB/GiB).
-- Baruch runs as alex (no root). Config in `~/.config/baruch/`, state in
+- Baruch runs as the normal user (no root). Config in `~/.config/baruch/`, state in
   `~/.local/state/baruch/`.
 
 ## Tech stack

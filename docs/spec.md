@@ -575,7 +575,7 @@ replacing the drive early.
 Example: the volume crashes, a disk upgrade fails, or ransomware encrypts the
 shares. Baruch isn't needed for the restore: the drives hold plain files.
 
-1. **Set up the NAS** again (DSM, shared folders, user alex, Homebrew rsync).
+1. **Set up the NAS** again (DSM, shared folders, your user, Homebrew rsync).
 1. **Dock BK-20A first** and copy back `home`. This also brings back Baruch's
    configuration and state (`~/.config/baruch/`, `~/.local/state/baruch/` are
    inside `/volume1/homes/alex`), including the registry.
@@ -604,14 +604,14 @@ The drives hold plain files, so restoring doesn't need Baruch.
 
 ## Preparing a drive
 
-Baruch runs as alex and doesn't check these; they're one-off steps by hand.
+Baruch runs as a normal user and doesn't check these; they're one-off steps by hand.
 
 1. Run an extended SMART test.
-1. Format it as ext4 in DSM, and give alex read/write access to its
+1. Format it as ext4 in DSM, and make sure the user Baruch runs as has read/write access to its
    `usbshare` shared folder.
 1. Turn off ext4's root reserve (5% by default, ~280 GiB on a 6 TB disk, which
-   alex can't use): `sudo tune2fs -m 0 /dev/<partition>`.
-1. On a disk that already holds data: `sudo chown -R alex` on it.
+   a normal user can't use): `sudo tune2fs -m 0 /dev/<partition>`.
+1. On a disk that already holds data: `sudo chown -R $USER` on it.
 1. `baruch drive register NAME`.
 
 ## Switching over from Hyper Backup
@@ -637,7 +637,7 @@ Nothing in Baruch is specific to Hyper Backup: the switch-over uses only
 1. Move the folders out of Hyper Backup's task folder on BK-20A into the
    `/<rule>/…` layout at the drive's root with `mv` (instant, same disk; e.g.
    `…/archive/movies` → `/movies`, `…/archive/tv` → `/tv`,
-   `…/homes/alex` → `/home`), after `sudo chown -R alex` on it (Hyper
+   `…/homes/alex` → `/home`), after `sudo chown -R $USER` on it (Hyper
    Backup's files belong to root). Then delete what's left of the task folder
    and register the drive as BK-20A.
 1. Back up to BK-20A. Pinned folders are synced incrementally. Overflow shows
@@ -675,9 +675,9 @@ through the personal Homebrew tap (`infogrind/homebrew-tap`, published with
 - **rsync options:** `-a -H --partial-dir=… --files-from=…`; excludes are
   already applied in the file list. Symlinks are
   copied as links, hard links are kept within a unit, large interrupted files
-  resume. Owners and Synology ACLs aren't kept, because Baruch runs as alex.
-- **User and locations:** Baruch runs as alex, without root. Files alex
-  can't read are reported (requirement 29). Configuration in
+  resume. Owners and Synology ACLs aren't kept, because Baruch runs as a normal user.
+- **User and locations:** Baruch runs as a normal user, without root. Files
+  it can't read are reported (requirement 29). Configuration in
   `~/.config/baruch/`, state (registry and its versions, contents lists, logs)
   in `~/.local/state/baruch/`. Both locations can be overridden (tests).
 - **Released version:** tag a release, run `pythonformula`. After generating the
@@ -789,7 +789,7 @@ that can't be read.
 - Rolling verify: each run also verifies a slice of the units not verified for
   the longest time.
 - Pinning one rule to several drives (one unit per drive, e.g.
-  `archive@BK-20A`).
+  `movies@BK-20A`).
 - Notifications (DSM or email) at the end of a run.
 - A `snapshot` command that records the NAS's real structure (names and sizes,
   names anonymised) as a test data description.
