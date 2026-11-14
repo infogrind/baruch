@@ -7,60 +7,78 @@ time. Named after Jeremiah's scribe, who wrote the burned scroll out again
 ## Source of truth
 
 The full spec is `docs/spec.md`. Read it before designing or changing
-behaviour. It holds the requirements (numbered 1–25), the registry format and
-move states, the failsafes, the example configuration, the scenarios (drive
+behaviour. It holds the design principle, the requirements (numbered 1–39), the
+registry format and unit states, the safety rules, the example configuration, the scenarios (drive
 outgrows its shows, drive breaks), tech stack and testing approach. If a decision
 changes the spec, update `docs/spec.md` in the same change. `README.md` is the
 user documentation and must agree with the spec.
 
+## Design principle
+
+Baruch is run by hand by someone looking at its output. When something needs a
+decision or is complicated, prefer surfacing the information (and the command to
+act on it) over having the tool decide and act automatically. Apply this when
+proposing designs.
+
 ## Core model (short version)
 
 - **Drive:** backup disk identified by a label file on it (name such as `BK-6A`
-  plus a random disk ID), never by DSM mount path.
-- **Rule:** source folder + excludes + placement: `pin` (whole source to named
-  drive(s)) or `spread` (each subfolder is a unit, assigned to one drive from an
-  ordered list).
+  plus a random disk ID), never by DSM mount path. Must be ext4.
+- **Rule:** source folder + placement (excludes are global only): `pin` (one named drive) or `spread`
+  (ordered list of drives). A rule's units are its direct subfolders, plus one
+  unit for loose files.
 - **Registry:** per unit `home` (where it should be) and `copies` (where it is,
-  written only after a successful sync). Move states are derived from the two,
-  never stored. Moves are copy first, then delete.
-- **Failsafes:** source marker file `.backup-source` must exist; deletions above
-  `max_delete` are held back until approved.
-- Planned real setup: everything except `archive/tv` pinned to `BK-20A`; tv
-  spread over `BK-6A`, `BK-6B`, `BK-20A`.
+  with sync time and result, written only after a finished sync). States are
+  derived, never stored. Moves (`move set`) are copy first, then delete.
+- **Runs are manual and plan-first:** `baruch run` computes the full plan, shows
+  it (with warnings for large deletions/overwrites), and asks y/n. `y` executes
+  exactly the plan. No scheduler, no eject, no notifications.
+- **Safety:** source marker `.backup-source` must exist; nothing outside the
+  plan is changed; data no unit explains is only removed by `prune`.
+- Sources never overlap, and Baruch never looks outside rule sources.
+- Planned real setup: one rule per folder in `/volume1/archive`, plus `home` and
+  `projects`. Everything is pinned to `BK-20A` except `tv`, which is spread over
+  `BK-6A`, `BK-6B`, `BK-20A`.
 
 ## Target environment (NAS "mynas")
 
-- DS1522+, DSM 7.2.2, x86_64. SSH: `ssh mynas`.
+- DS1522+, DSM 7.2.2, x86_64. SSH: `ssh mynas`. `/volume1` is ext4.
 - System Python is 3.8: don't use it. Homebrew lives in
   `/home/linuxbrew/.linuxbrew` (Python 3.15). It isn't on the PATH for
   non-interactive ssh, so call `/home/linuxbrew/.linuxbrew/bin/brew` directly.
-- USB drives mount as `/volumeUSB*/usbshare*`.
-- Data sources: `/volume1/archive` (~18.9 TB, tv 10.0 TB, movies 8.3 TB),
+- USB drives mount as `/volumeUSB*/usbshare*`. The system partition `/` has
+  under 1 GiB free: never write to an unmounted mount point.
+- Data sources: `/volume1/archive` (~17.1 TiB, tv 9.1 TiB, movies 7.5 TiB),
   `/volume1/homes/alex`, `/volume1/projects`. Full `du` over ssh is very slow.
-- Trigger: DSM Task Scheduler runs `baruch run` every few minutes; it's a no-op
-  when no registered drive is docked.
+  All sizes are binary units (TiB/GiB).
+- Baruch runs as alex (no root). Config in `~/.config/baruch/`, state in
+  `~/.local/state/baruch/`.
 
 ## Tech stack
 
 - Python ≥ 3.12, uv, hatchling build backend, ruff, pytest. Only Python
   dependency: PyYAML.
-- rsync is called as a subprocess and must be Homebrew's rsync (declared as a
-  formula dependency). Never use `/usr/bin/rsync`: on macOS it's openrsync.
+- rsync is called as a subprocess: Homebrew's (`<prefix>/opt/rsync/bin/rsync`),
+  else the one on the `PATH` (Linux CI: the distribution's). No config setting.
+  Baruch refuses openrsync and rsync < 3.2, so `/usr/bin/rsync` on macOS
+  (openrsync) and DSM (3.1.2) is never used.
 - Release: tag, then publish to `infogrind/homebrew-tap` with `pythonformula`.
-  NAS: `brew tap infogrind/tap && brew install baruch`.
+  Add `depends_on "rsync"` to the formula by hand once; `pythonformula` keeps
+  it. NAS: `brew tap infogrind/tap && brew install baruch`.
 - Dev version on the NAS: `uv tool install --force git+https://github.com/infogrind/baruch@<branch>`.
 
 ## Testing
 
-- Everything must run on the Mac with `uv run pytest`; GitHub Actions also runs
-  it on Linux.
-- NAS-specific parts (drive discovery, free space, eject, notifications) sit
-  behind small replaceable interfaces with test fakes.
-- Logic tests: config + registry + drive state in, planned actions out.
+- Everything runs with `uv run pytest` on the Mac (except tests for names the
+  Mac can't represent) and on Linux in GitHub Actions (distro rsync ≥ 3.2).
+- NAS-specific parts (drive discovery, free space, mount check) sit behind small
+  replaceable interfaces with test fakes.
+- Logic tests: config + registry + file listings in, plan out.
 - End-to-end tests: synthetic data in a temp dir, real rsync, fake drives are
-  temp folders with a label file and a fake capacity.
+  temp folders with a label file and a fake capacity that is also enforced on
+  writes.
 - Test data: YAML descriptions in `tests/data/` describe only the starting
-  state (scale 1 MB = 1 TB). Content is generated per test from path + version
+  state (scale 1 MB = 1 TiB). Content is generated per test from path + version
   number. Nothing generated is committed, and no zero-filled files.
 - Changes happen in test code via helpers (`nas.replace`, `nas.add`,
   `nas.delete`, `nas.rename`, `nas.add_show`, `nas.remove_marker`).
@@ -70,9 +88,9 @@ user documentation and must agree with the spec.
 
 ## Open points
 
-- Does ejecting a USB drive via DSM need root? Decides whether baruch runs as
-  alex or root. Test early on the NAS.
 - GitHub repo `infogrind/baruch` not created yet. Don't push or create remote
   resources without asking.
-- Check free space on the 20 TB drive next time it's docked.
-- Notification channel: DSM or email.
+- Check free space of the 20 TB drive (ext4, confirmed) and the layout of
+  Hyper Backup's task folder on it.
+- `README.md` still describes the old design and must be rewritten from the
+  spec.
