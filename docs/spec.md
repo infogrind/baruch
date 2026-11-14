@@ -749,7 +749,7 @@ def test_replaced_episode_is_synced(nas, drives, run):
     bk6a = drives.register("BK-6A", capacity="5.46MB")
     run(dock=bk6a, answer="y")
 
-    nas.replace("archive/tv/Show A/Season 1/S01E01.mkv")   # version 2
+    nas.replace("archive/tv/Show A/Season 1/S01E01.mkv")  # version 2
     run(dock=bk6a, answer="y")
 
     assert bk6a.read("tv/Show A/Season 1/S01E01.mkv") == nas.read(

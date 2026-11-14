@@ -73,15 +73,16 @@ proposing designs.
   Mac can't represent) and on Linux in GitHub Actions (distro rsync ≥ 3.2).
 - NAS-specific parts (drive discovery, free space, mount check) sit behind small
   replaceable interfaces with test fakes.
-- Logic tests: config + registry + file listings in, plan out.
-- End-to-end tests: synthetic data in a temp dir, real rsync, fake drives are
-  temp folders with a label file and a fake capacity that is also enforced on
-  writes.
-- Test data: YAML descriptions in `tests/data/` describe only the starting
-  state (scale 1 MB = 1 TiB). Content is generated per test from path + version
-  number. Nothing generated is committed, and no zero-filled files.
-- Changes happen in test code via helpers (`nas.replace`, `nas.add`,
-  `nas.delete`, `nas.rename`, `nas.add_show`, `nas.remove_marker`).
+- Logic tests (`tests/unit/`): config + registry + file listings in, plan out.
+- End-to-end tests (`tests/e2e/`, harness in `tests/support.py`): a fake NAS in
+  a temp dir, real rsync, the CLI called in-process. Fake drives are temp
+  folders on a "shelf", docked by symlinking them into the USB search folder;
+  free space is computed from their files against a fake capacity. Running out
+  of space mid-unit is simulated by replacing `execute.run_rsync`.
+- Test data is built in test code (`env.nas.add_show`, `add`, `replace`,
+  `delete`, `rename`, `mark`, `remove_marker`). Content is derived from path +
+  version number, never zero-filled; nothing generated is committed. YAML test
+  data descriptions in `tests/data/` (spec) aren't implemented yet.
 - Odd file names (NFC/NFD umlauts, invalid UTF-8, special characters, `@eaDir`,
   symlinks, unreadable files): tests the Mac's file system can't represent are
   skipped on macOS and run on Linux CI.

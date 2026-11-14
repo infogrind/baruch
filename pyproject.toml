@@ -1,0 +1,32 @@
+[project]
+name = "baruch"
+version = "0.1.0"
+description = "Rule-based backup of a Synology NAS to several drives, docked one at a time"
+readme = "README.md"
+authors = [{ name = "infogrind" }]
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+baruch = "baruch.cli:entry"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
