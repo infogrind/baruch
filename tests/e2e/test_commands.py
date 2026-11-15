@@ -228,3 +228,26 @@ def test_verify_offers_to_copy_unreadable_files_again(env):
     assert r.code == 0, r.out
     assert "copy these 1 unreadable files again from the NAS" in r.out
     assert a.read("tv/Wire/S01E01.mkv") == env.nas.read(f"{TV}/Wire/S01E01.mkv")
+
+
+def test_init_writes_a_commented_starter_config(env):
+    r = env.run("init")
+
+    assert r.code == 0, r.out
+    text = (env.config_dir / "config.yaml").read_text()
+    assert "# " in text and "spread:" in text and "pin:" in text
+    assert "config.yaml" in r.out
+    r = env.run("config", "check")
+    assert r.code == 0, r.out
+    assert "0 rules" in r.out
+
+
+def test_init_keeps_an_existing_config(env):
+    env.config(rules=[], drives={"BK-6A": "10%"})
+    before = (env.config_dir / "config.yaml").read_text()
+
+    r = env.run("init")
+
+    assert r.code == 0, r.out
+    assert (env.config_dir / "config.yaml").read_text() == before
+    assert "kept" in r.out

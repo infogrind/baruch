@@ -82,10 +82,20 @@ brew install baruch
 Homebrew isn't on the `PATH` for non-interactive ssh sessions. Log in
 interactively, or call `/home/linuxbrew/.linuxbrew/bin/baruch` directly.
 
-### 2. Write the configuration
+### 2. Create the registry and a starter configuration
 
-Create `~/.config/baruch/config.yaml`, with one rule per top-level folder you
-want backed up:
+```sh
+baruch init
+```
+
+This creates an empty registry and, since there's no configuration yet, a
+commented starter at `~/.config/baruch/config.yaml`: settings filled in, no
+drives or rules yet, examples in the comments.
+
+### 3. Write the configuration
+
+Edit `~/.config/baruch/config.yaml`: one entry per drive, and one rule per
+top-level folder you want backed up:
 
 ```yaml
 settings:
@@ -121,7 +131,7 @@ rules:
 Sources must not overlap: no source may lie inside another. Baruch only looks
 inside rule sources, so a folder without a rule isn't backed up.
 
-### 3. Mark the sources and create the registry
+### 4. Mark the sources and check the configuration
 
 Each source needs a marker file. If it's missing (volume not mounted, folder
 renamed), Baruch skips the rule and touches nothing on the drive for it.
@@ -133,10 +143,9 @@ touch /volume1/homes/alex/.backup-source
 touch /volume1/archive/tv/.backup-source
 
 baruch config check
-baruch init
 ```
 
-### 4. Prepare and register the 6 TB drives
+### 5. Prepare and register the 6 TB drives
 
 Baruch doesn't check these one-off steps. Do them for every new disk:
 
@@ -152,7 +161,7 @@ Then dock it and register it:
 baruch drive register BK-6A
 ```
 
-### 5. First backups to BK-6A and BK-6B
+### 6. First backups to BK-6A and BK-6B
 
 ```sh
 baruch run --dry-run   # look at the plan, change nothing
@@ -168,7 +177,7 @@ next run continues.
 When the run says "safe to eject in DSM", eject the drive in DSM, dock BK-6B and
 run again. Shows that fit on neither drive stay *waiting* for BK-20A.
 
-### 6. Bring over the 20 TB drive
+### 7. Bring over the 20 TB drive
 
 Stop using the Hyper Backup task. Then, on the 20 TB drive:
 
@@ -179,7 +188,7 @@ Stop using the Hyper Backup task. Then, on the 20 TB drive:
 1. Delete what's left of the task folder.
 1. `baruch drive register BK-20A`
 
-### 7. First backup to BK-20A
+### 8. First backup to BK-20A
 
 ```sh
 baruch run
@@ -302,7 +311,8 @@ and run `baruch config check`. Its units are placed on the next runs.
 
 ### Changing the configuration
 
-You edit the configuration by hand; Baruch never changes it. Changes take effect
+You edit the configuration by hand; apart from the starter that `baruch init`
+writes, Baruch never changes it. Changes take effect
 on the next run, by the normal rules:
 
 | Change | Effect |
@@ -553,7 +563,10 @@ source lies inside another, and every drive named in a rule is listed under
 
 ### `baruch init`
 
-Creates an empty registry. Needed once, before the first run.
+Creates an empty registry, needed once before the first run. If there's no
+configuration yet, it also writes a commented starter to
+`~/.config/baruch/config.yaml`; an existing configuration is kept as it is.
+Refuses if a registry already exists.
 
 ### `baruch registry restore`
 
@@ -581,7 +594,7 @@ sync finished without errors.
 
 | Where | What |
 | --- | --- |
-| `~/.config/baruch/config.yaml` | Configuration, edited by hand |
+| `~/.config/baruch/config.yaml` | Configuration, edited by hand (`baruch init` writes a starter) |
 | `~/.local/state/baruch/` | Registry and its last 10 versions, contents lists, saved plans and logs |
 | `/<rule>/…` on each drive | The backed-up files, as plain files |
 | `/.baruch/` on each drive | Label, registry snapshot, copy of the configuration, contents list, `restore.sh`, partial files |

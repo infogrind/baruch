@@ -410,7 +410,8 @@ home and copies.
   never leaves a stale lock. Read-only commands (`status`, `find`) don't take
   it and work during a run. The registry is written atomically (temporary file,
   then rename). A version is saved before each command or run that changes it,
-  and the last 10 are kept. `baruch init` creates the registry. If it's missing
+  and the last 10 are kept. `baruch init` creates the registry, and a commented starter
+  configuration if there's none yet. If the registry is missing
   or can't be read, Baruch refuses to do anything and names `init` and
   `registry restore`; it never starts with an empty one. Times are stored in
   UTC.
@@ -440,8 +441,10 @@ home and copies.
 
 ## Configuration
 
-`~/.config/baruch/config.yaml`, edited by hand. Baruch never changes it: its
-commands only change the registry and drive labels. Everything except TV is pinned to the 20 TB
+`~/.config/baruch/config.yaml`, edited by hand. `baruch init` writes a
+commented starter (settings filled in, no drives or rules, examples in
+comments) if no configuration exists yet. Apart from that, Baruch never changes
+it: its commands only change the registry and drive labels. Everything except TV is pinned to the 20 TB
 drive. TV is spread over the two 6 TB drives, with the 20 TB drive as the last
 choice.
 

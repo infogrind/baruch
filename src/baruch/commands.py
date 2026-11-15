@@ -55,6 +55,7 @@ from baruch.render import (
 from baruch.restore import write_script
 from baruch.scan import FILE, FILES_UNIT, TreeScan, scan_drive_root, scan_tree
 from baruch.sizes import human
+from baruch.starter import STARTER
 from baruch.timefmt import from_text, show, to_text
 
 LOG_DAYS = 90
@@ -269,6 +270,13 @@ def cmd_init(ctx: Context, args) -> int:
     lock(ctx, store)
     store.create(Registry())
     out(f"Created an empty registry at {store.path}.")
+    path = config_path(ctx)
+    if path.exists():
+        out(f"Your configuration at {path} is kept as it is.")
+    else:
+        write_atomic(path, STARTER)
+        out(f"Wrote a commented starter configuration to {path}: edit it, then")
+        out("check it with `baruch config check`.")
     return 0
 
 
