@@ -94,7 +94,7 @@ details live only in the configuration.
 1. Rules don't depend on what the folders contain.
 1. On each drive, every rule gets its own folder, `/<rule name>/…`, so rules
    never collide. Baruch's own files (label, registry snapshot, `config.yaml`,
-   contents list, partial files) live in `/.baruch/`. Rule names may only use
+   contents list, `restore.sh`, partial files) live in `/.baruch/`. Rule names may only use
    `A–Z a–z 0–9 _ -`.
 1. Sources never overlap: no rule's source is inside another's. Every run and
    `config check` refuse a configuration where they do. Baruch only looks
@@ -232,9 +232,17 @@ details live only in the configuration.
 01. **Ctrl-C** stops rsync. Units already finished stay recorded, the snapshot
     and contents list are written, and the next run continues.
 
-01. At the end of a run, the registry snapshot, a copy of `config.yaml` and a
-    contents list (all files on the drive) are written to the drive. The contents list is also kept on the
-    NAS. The run ends with a summary in the terminal; its last line is "safe to
+01. At the end of a run, the registry snapshot, a copy of `config.yaml`, a
+    contents list (all files on the drive) and a **restore script** are
+    written to the drive. The contents list is also kept on the NAS.
+    `/.baruch/restore.sh` copies everything on the drive back to the NAS
+    without Baruch, one `rsync -a` per rule folder on the drive, to the rule's
+    source as configured at that time (the rule holding Baruch's own files
+    first, since it brings back the configuration and registry). Without
+    `--run` it only shows what it would copy (`rsync -n`); it never deletes
+    on the NAS, finds the drive from its own location (the mount path may
+    differ after a rebuild), and uses the rsync on the `PATH`. `prune`
+    rewrites it too. The run ends with a summary in the terminal; its last line is "safe to
     eject in DSM" once everything is written. There are no notifications, and
     the drive is not ejected by Baruch. A run is **complete** when every home
     unit of the drive ended with `ok` or `errors`.
@@ -576,10 +584,14 @@ Example: the volume crashes, a disk upgrade fails, or ransomware encrypts the
 shares. Baruch isn't needed for the restore: the drives hold plain files.
 
 1. **Set up the NAS** again (DSM, shared folders, your user, Homebrew rsync).
-1. **Dock BK-20A first** and copy back `home`. This also brings back Baruch's
+1. **Dock BK-20A first** and run its restore script, which copies back `home`
+   first. This also brings back Baruch's
    configuration and state (`~/.config/baruch/`, `~/.local/state/baruch/` are
    inside `/volume1/homes/alex`), including the registry.
-1. **Copy back each drive**, rule folder by rule folder, e.g.
+1. **Copy back each drive** with its restore script: `sh .baruch/restore.sh`
+   shows what it would copy, `sh .baruch/restore.sh --run` copies. Edit the
+   targets at the top first if the NAS has different paths now. By hand, it's
+   one `rsync -a` per rule folder, e.g.
    `rsync -a /volumeUSB1/usbshare/tv/ /volume1/archive/tv/`. If a unit has
    copies on several drives, the registry (or each drive's snapshot) shows which
    one is newest.

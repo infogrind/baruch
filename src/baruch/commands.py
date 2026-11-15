@@ -52,6 +52,7 @@ from baruch.render import (
     reserve_line,
     suggestion_line,
 )
+from baruch.restore import write_script
 from baruch.scan import FILE, FILES_UNIT, TreeScan, scan_drive_root, scan_tree
 from baruch.sizes import human
 from baruch.timefmt import from_text, show, to_text
@@ -435,6 +436,7 @@ def finish(ctx, out, config, reg, store, d, plan) -> None:
     now = ctx.host.now()
     write_contents(ctx, d)
     shutil.copyfile(config_path(ctx), d.path / BARUCH_DIR / "config.yaml")
+    write_script(config, d.name, d.path, [ctx.config_dir, ctx.state_dir], now)
     capacity, free = ctx.host.disk_usage(d.path)
     drive = reg.drives[d.name]
     drive.capacity, drive.free, drive.last_seen = capacity, free, now
@@ -832,6 +834,9 @@ def cmd_prune(ctx: Context, args) -> int:
             del reg.units[n]
     store.save(reg)
     write_contents(ctx, d)
+    write_script(
+        config, d.name, d.path, [ctx.config_dir, ctx.state_dir], ctx.host.now()
+    )
     out(f"Deleted {len(delete)} items ({human(total)}).")
     return 0
 

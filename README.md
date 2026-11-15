@@ -385,10 +385,24 @@ were only on a forgotten drive are reported as on no drive.
 
 1. Set up the NAS again: DSM, shared folders, the user account, Homebrew and
    rsync.
-1. Dock the drive that holds the `home` rule first and copy it back. That also
-   restores Baruch's configuration and registry, which live in the home folder.
-1. Copy back each drive, rule folder by rule folder, e.g.
-   `rsync -a /volumeUSB1/usbshare/tv/ /volume1/archive/tv/`.
+
+1. Dock the drive that holds the `home` rule first and restore it (below).
+   That also brings back Baruch's configuration and registry, which live in the
+   home folder.
+
+1. Copy back each drive with the restore script that every run writes to it:
+
+   ```sh
+   sh /volumeUSB1/usbshare/.baruch/restore.sh         # shows what it would copy
+   sh /volumeUSB1/usbshare/.baruch/restore.sh --run   # copies
+   ```
+
+   It needs only rsync, not Baruch: one `rsync -a` per rule folder on the
+   drive, back to the rule's source as configured at the last run. The rule
+   holding Baruch's own files goes first. It never deletes anything on the
+   NAS, and works wherever the drive is mounted. If the NAS has different paths
+   now, edit the targets in the script first.
+
 1. Without that drive: every drive carries `/.baruch/` with a registry snapshot
    and a copy of the configuration. They show its rules, the units it holds,
    and which drives hold the rest.
@@ -570,7 +584,7 @@ sync finished without errors.
 | `~/.config/baruch/config.yaml` | Configuration, edited by hand |
 | `~/.local/state/baruch/` | Registry and its last 10 versions, contents lists, saved plans and logs |
 | `/<rule>/…` on each drive | The backed-up files, as plain files |
-| `/.baruch/` on each drive | Label, registry snapshot, copy of the configuration, contents list, partial files |
+| `/.baruch/` on each drive | Label, registry snapshot, copy of the configuration, contents list, `restore.sh`, partial files |
 
 Both NAS locations are inside your home folder, so the `home` rule backs them
 up too.
