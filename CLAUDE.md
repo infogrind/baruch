@@ -63,8 +63,9 @@ proposing designs.
   Baruch refuses openrsync and rsync < 3.2, so `/usr/bin/rsync` on macOS
   (openrsync) and DSM (3.1.2) is never used.
 - Release: tag, then publish to `infogrind/homebrew-tap` with `pythonformula`.
-  Add `depends_on "rsync"` to the formula by hand once; `pythonformula` keeps
-  it. NAS: `brew tap infogrind/tap && brew install baruch`.
+  The formula has two hand-added lines, `depends_on "rsync"` and
+  `depends_on "libyaml"` (for PyYAML, required by `brew audit`);
+  `pythonformula` keeps them. Released: v0.1.0. NAS: `brew tap infogrind/tap && brew install baruch`.
 - Dev version on the NAS: `uv tool install --force git+https://github.com/infogrind/baruch@<branch>`.
 
 ## Testing

@@ -733,8 +733,9 @@ through the personal Homebrew tap (`infogrind/homebrew-tap`, published with
   `~/.config/baruch/`, state (registry and its versions, contents lists, logs)
   in `~/.local/state/baruch/`. Both locations can be overridden (tests).
 - **Released version:** tag a release, run `pythonformula`. After generating the
-  formula for the first time, add `depends_on "rsync"` to it by hand;
-  `pythonformula` keeps it on later updates. On the NAS, once
+  formula for the first time, add `depends_on "rsync"` and
+  `depends_on "libyaml"` (for PyYAML; `brew audit --strict` asks for it) to it
+  by hand; `pythonformula` keeps them on later updates. On the NAS, once
   `brew tap infogrind/tap`, then `brew install` / `brew upgrade`.
 - **Development version on the NAS:** `brew install uv` once, then
   `uv tool install --force git+https://github.com/infogrind/baruch@<branch>`.
