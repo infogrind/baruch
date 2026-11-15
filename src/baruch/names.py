@@ -12,11 +12,14 @@ import re
 import unicodedata
 
 _ESCAPE = re.compile(r"\\(\\|x[0-9a-fA-F]{2})")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def escape(name: str) -> str:
     raw = name.encode("utf-8", "surrogateescape").replace(b"\\", b"\\\\")
-    return raw.decode("utf-8", "backslashreplace")
+    text = raw.decode("utf-8", "backslashreplace")
+    # Control characters (tab, newline, …) too, so lists stay one name per line.
+    return _CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
 
 
 def unescape(text: str) -> str:

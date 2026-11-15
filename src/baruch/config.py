@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -112,7 +113,15 @@ def _settings(raw: dict, problems: list[str]) -> Settings:
 
 def _drives(raw: dict, problems: list[str]) -> dict[str, DriveConf]:
     out = {}
+    if not isinstance(raw, dict):
+        problems.append(
+            "drives: expected one entry per drive, e.g. BK-6A: { reserve: 10% }"
+        )
+        return out
     for name, entry in raw.items():
+        if entry is not None and not isinstance(entry, dict):
+            problems.append(f"drives: {name}: expected {{ reserve: … }}, got {entry!r}")
+            continue
         reserve = (entry or {}).get("reserve", "0%")
         conf = DriveConf(str(name))
         try:
@@ -128,7 +137,13 @@ def _drives(raw: dict, problems: list[str]) -> dict[str, DriveConf]:
 
 def _rules(raw: list, problems: list[str]) -> list[Rule]:
     rules: list[Rule] = []
+    if not isinstance(raw, list):
+        problems.append("rules: expected a list of rules")
+        return rules
     for entry in raw:
+        if not isinstance(entry, dict):
+            problems.append(f"rule {entry!r}: expected name, source and pin or spread")
+            continue
         name = str(entry.get("name", ""))
         if not RULE_NAME.fullmatch(name):
             problems.append(
@@ -140,6 +155,8 @@ def _rules(raw: list, problems: list[str]) -> list[Rule]:
         if "source" not in entry:
             problems.append(f"rule {name!r}: no source")
             continue
+        if not Path(str(entry["source"])).is_absolute():
+            problems.append(f"rule {name!r}: source must be an absolute path")
         pin, spread = entry.get("pin"), entry.get("spread")
         if bool(pin) == bool(spread):
             problems.append(f"rule {name!r}: needs exactly one of pin or spread")
@@ -159,15 +176,16 @@ def _rules(raw: list, problems: list[str]) -> list[Rule]:
         problems.append(f"rule {name!r}: defined more than once")
     for i, a in enumerate(rules):
         for b in rules[i + 1 :]:
-            if a.source == b.source:
+            sa, sb = _real(a.source), _real(b.source)
+            if sa == sb:
                 problems.append(
                     f"rules {a.name!r} and {b.name!r} have the same source; "
                     "sources must not overlap"
                 )
                 continue
-            if b.source.is_relative_to(a.source):
+            if sb.is_relative_to(sa):
                 inner, outer = b, a
-            elif a.source.is_relative_to(b.source):
+            elif sa.is_relative_to(sb):
                 inner, outer = a, b
             else:
                 continue
@@ -177,6 +195,11 @@ def _rules(raw: list, problems: list[str]) -> list[Rule]:
                 "overlap"
             )
     return rules
+
+
+def _real(path: Path) -> Path:
+    """Resolves symlinks and `..`, so overlaps through them are found too."""
+    return Path(os.path.realpath(path))
 
 
 def check(config: Config) -> list[str]:

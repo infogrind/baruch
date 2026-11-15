@@ -126,3 +126,21 @@ def test_openrsync_and_old_rsync_are_refused(tmp_path):
     with pytest.raises(RsyncError, match="older than"):
         check_rsync(fake_rsync(tmp_path, "rsync  version 3.1.2  protocol version 31"))
     check_rsync(fake_rsync(tmp_path, "rsync  version 3.2.7  protocol version 31"))
+
+
+def test_rsync_messages_are_classified():
+    from baruch.execute import DriveError, DriveFull, classify
+
+    sender = 'rsync: [sender] send_files failed to open "/n/a": Permission denied (13)'
+    gone = 'rsync: [sender] link_stat "/n/b" failed: No such file or directory (2)'
+    receiver = 'rsync: [receiver] rename "/d/.a" -> "a": Operation not permitted (1)'
+    assert classify(0, "").result == OK
+    assert classify(23, sender).result == "errors"
+    assert classify(23, gone).result == OK
+    assert classify(24, 'file has vanished: "/n/c"').result == OK
+    with pytest.raises(DriveError):
+        classify(23, receiver)
+    with pytest.raises(DriveFull):
+        classify(11, "rsync: write failed on /d/a: No space left on device (28)")
+    with pytest.raises(KeyboardInterrupt):
+        classify(20, "rsync error: received SIGINT")

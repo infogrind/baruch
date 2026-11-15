@@ -55,6 +55,7 @@ class Drive:
     last_seen: datetime | None = None
     last_complete_run: datetime | None = None
     last_verify: datetime | None = None
+    read_errors: int = 0  # at the last verify
 
     @property
     def forgotten(self) -> bool:
@@ -111,6 +112,7 @@ def to_doc(reg: Registry) -> dict:
             "last_seen": to_text(d.last_seen),
             "last_complete_run": to_text(d.last_complete_run),
             "last_verify": to_text(d.last_verify),
+            "read_errors": d.read_errors,
         }
     return {"units": units, "drives": drives}
 
@@ -142,6 +144,7 @@ def from_doc(doc: dict) -> Registry:
             from_text(raw.get("last_seen")),
             from_text(raw.get("last_complete_run")),
             from_text(raw.get("last_verify")),
+            int(raw.get("read_errors") or 0),
         )
     return reg
 
@@ -157,8 +160,9 @@ def parse(text: str) -> Registry:
         raise RegistryError(f"can't read the registry: {e}") from None
 
 
-def write_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def write_atomic(path: Path, text: str, parents: bool = True) -> None:
+    if parents:
+        path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:

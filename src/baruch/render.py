@@ -45,8 +45,22 @@ def render_plan(plan: Plan, reg: Registry, where: str) -> str:
     out: list[str] = [f"Plan for {plan.drive} ({where})", ""]
     for op in plan.ops:
         out.extend(unit_lines(op))
-    if plan.empty:
+    changes = plan.registry_changes()
+    problems = (
+        plan.drive_errors or plan.scan_errors or plan.unreadable or plan.markers_missing
+    )
+    if plan.empty and not plan.needs_answer and not problems:
         out.append("Nothing to do: everything on this drive is up to date.")
+    elif plan.empty:
+        out.append("No files change on this drive.")
+    if changes:
+        out.append("Registry changes:")
+        out.extend(f"  {names.display(c)}" for c in changes)
+    for path, msg in plan.drive_errors:
+        out.append(
+            f"{names.display(path)}: can't be read on the drive ({msg}): skipped, "
+            "nothing there is changed"
+        )
 
     for rule in plan.markers_missing:
         out.append(

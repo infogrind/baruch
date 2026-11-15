@@ -82,12 +82,14 @@ details live only in the configuration.
    rules alike (`movies/Heat (1995)`, `tv/The Wire`). Files directly in the
    source folder form one extra unit, `<rule>/(files)`; so do symlinks there
    (copied as links). Special files (sockets, pipes, devices) are skipped with
-   a count. Excluded folders are not units. An empty
+   a count. Excluded folders are not units. A real folder named `(files)`
+   can't be a unit: it's reported as a scan error (rename it). An empty
    folder is a unit of size 0. A renamed folder is a gone unit plus a new
    unit, so it's copied again (rename detection is listed under Later).
 1. A unit's name is the folder name exactly as on disk: the NFC and NFD forms of
    a name are different units, and names that aren't valid UTF-8 are stored
-   escaped (reversibly) in the registry. On the command line, a unit name is
+   escaped (reversibly) in the registry, in contents lists and in output,
+   together with control characters such as tab and newline. On the command line, a unit name is
    matched exactly; if nothing matches, Baruch shows similar units (e.g. the
    other Unicode form) and the user picks one. Unprintable characters are
    escaped in all output.
@@ -96,8 +98,9 @@ details live only in the configuration.
    never collide. Baruch's own files (label, registry snapshot, `config.yaml`,
    contents list, `restore.sh`, partial files) live in `/.baruch/`. Rule names may only use
    `A–Z a–z 0–9 _ -`.
-1. Sources never overlap: no rule's source is inside another's. Every run and
-   `config check` refuse a configuration where they do. Baruch only looks
+1. Sources are absolute paths and never overlap: no rule's source is inside
+   another's, also not through a symlink or `..`. Every run and `config check`
+   refuse a configuration where they do. Baruch only looks
    inside rule sources: a folder that no rule covers (e.g. a new folder in
    `/volume1/archive`) isn't backed up and isn't reported until a rule is added
    for it.
@@ -134,14 +137,16 @@ details live only in the configuration.
 
 18. When units grow into a drive's reserve, the end of each run and the status
     show how much of the reserve is used and suggest which units to move: the
-    fewest units that bring the drive back to its reserve, preferring those that
-    haven't changed for the longest time. The destination follows the placement
+    fewest units that bring the drive back to its reserve (one unit if one is
+    enough, otherwise the largest first), preferring those that haven't changed
+    for the longest time. The destination follows the placement
     rules. The suggestion includes the command to run. Suggestions are computed
     on the fly and not stored.
 01. A move is `baruch move set UNIT --to DRIVE`, which sets the unit's `home`.
     The new drive gets the copy when it's docked; the old copy is deleted when
-    the old drive is docked **and** the new home has a confirmed copy (copy
-    first, then delete). In the plan, this deletion is labelled ("moved to
+    the old drive is docked **and** the new home has a confirmed copy at least
+    as recent as the old one (copy first, then delete; moving a unit back to a
+    drive with an older copy never deletes the newer one). In the plan, this deletion is labelled ("moved to
     BK-6B, copy confirmed there on …") and doesn't trigger a warning.
 01. `move set` refuses targets that aren't registered or aren't in the unit's
     spread list (to use another drive, add it to the list first). It warns
@@ -192,11 +197,21 @@ details live only in the configuration.
     (`--files-from`), and Baruch carries out the planned deletions itself. A
     planned file that changes before it's copied is copied as it is at copy
     time. Files added or deleted on the NAS after the plan was made are not
-    handled in this run; they're reported and picked up next time. There's no `--yes`, and `run` refuses to run without a
-    terminal. `baruch run --skip UNIT`
-    (repeatable) leaves units out of the plan: they're shown as "skipped on
-    request" and stay *outdated*, e.g. while the user looks into a suspicious
-    change.
+    handled in this run; they're reported and picked up next time. There's no
+    `--yes`, and `run` refuses to run without a terminal.
+
+    **Registry changes** that touch no files on this drive (a home changed by
+    a config edit, a new unit whose home is another drive, a copy record
+    dropped or confirmed, a unit gone on the NAS) are listed in the plan and
+    also need a `y`. Only when there's neither a file operation nor a registry
+    change does the run skip the question; it then just records the drive
+    (last seen, free space, snapshot).
+
+    `baruch run --skip UNIT` (repeatable) leaves units out of the plan, gone
+    ones included: they're shown as "skipped on request" and nothing of them
+    on the drive changes, e.g. while the user looks into a suspicious change.
+    A skipped unit with changes stays *outdated*; one without changes stays as
+    it was. Unknown names are refused, with similar ones suggested.
 
 01. `baruch run --dry-run` shows the plan and exits. It writes nothing, not even
     `last_seen`.
@@ -218,16 +233,21 @@ details live only in the configuration.
     interrupted, the unit in progress is recorded as *incomplete* and the next
     run finishes it.
 
-01. **Errors:** files that vanished during copying → warning, the unit counts as
-    synced. Files that can't be read on the NAS → the unit is "synced with
-    errors", and the files are listed. Read or write errors on the drive → the
+01. **Errors:** files that vanished during copying, or were deleted on the NAS
+    between the plan and the copy → warning, the unit counts as synced. Files
+    that can't be read on the NAS (rsync's sending side) → the unit is "synced
+    with errors", and the files are listed. Read or write errors on the drive
+    (rsync's receiving side, a full disk) → the unit is *incomplete* and the
     run stops for that drive. **Scan errors on the NAS** (an unreadable folder,
-    an I/O error) → no deletions are planned under that path; the plan lists
-    the path and the error, and everything else goes ahead. A unit whose folder
-    can't be read is shown as *unreadable*, not gone. Before each unit, Baruch checks that the drive is
-    still mounted and its label still matches; otherwise it stops and records
-    nothing for that unit. (Otherwise rsync could write into the empty mount
-    folder on the NAS's system partition, which has under 1 GiB free.)
+    an I/O error, also on a unit folder or loose file itself) → no deletions
+    are planned under that path; the plan lists the path and the error, and
+    everything else goes ahead. A unit whose folder can't be read is shown as
+    *unreadable*, never gone or orphaned. A folder on the drive that can't be
+    read is reported and nothing in it is changed; the run then exits non-zero
+    and doesn't count as complete. Before each unit, Baruch checks that the
+    drive is still mounted and its label still matches; otherwise it stops and
+    records nothing for that unit. (Otherwise rsync could write into the empty
+    mount folder on the NAS's system partition, which has under 1 GiB free.)
 
 01. **Ctrl-C** stops rsync. Units already finished stay recorded, the snapshot
     and contents list are written, and the next run continues.
@@ -239,13 +259,21 @@ details live only in the configuration.
     without Baruch, one `rsync -a` per rule folder on the drive, to the rule's
     source as configured at that time (the rule holding Baruch's own files
     first, since it brings back the configuration and registry). Without
-    `--run` it only shows what it would copy (`rsync -n`); it never deletes
-    on the NAS, finds the drive from its own location (the mount path may
+    `--run` it only lists the files it would copy (`rsync -n`); it never
+    deletes on the NAS, keeps files there that are newer than the drive's
+    (`rsync --update`), finds the drive from its own location (the mount path may
     differ after a rebuild), and uses the rsync on the `PATH`. `prune`
     rewrites it too. The run ends with a summary in the terminal; its last line is "safe to
     eject in DSM" once everything is written. There are no notifications, and
     the drive is not ejected by Baruch. A run is **complete** when every home
     unit of the drive ended with `ok` or `errors`.
+
+    The same mount check comes first: if the drive is gone, nothing is
+    written to it, its contents list on the NAS and its recorded free space
+    stay as they were, and the run says so. Writes to the drive never create
+    folders above `/.baruch/`. If a write fails (e.g. the drive is full), it's
+    reported and the registry is still saved on the NAS. Leftover partial
+    files in `/.baruch/partial` are removed.
 
 01. Exit code 0 for success, also with warnings; non-zero only for errors. Each
     real run writes a log with the full plan; logs are kept for 90 days.
@@ -257,8 +285,9 @@ details live only in the configuration.
     above the reserves. It lists the units that need attention (waiting, copy
     pending, outdated, incomplete, synced with errors, cleanup pending, gone,
     units with no backup at all), move suggestions, orphaned data (requirement
-    38), drives no longer in the config that still hold copies, and drives not
-    docked for longer than `stale_after`.
+    38), drives no longer in the config that still hold copies, drives not
+    docked for longer than `stale_after`, and drives whose last verify found
+    read errors (with the recommendation to replace them).
 01. `baruch find PATTERN` searches the contents lists on the NAS and shows which
     drives hold matching files, and how current each copy is. Forgotten drives
     aren't searched: a file only they held is reported as on no drive.
@@ -319,8 +348,9 @@ details live only in the configuration.
 01. `baruch verify` reads every file of the docked drive's home units, compares
     checksums with the NAS, and reports:
 
-    - read errors on the drive (counted; many errors make the status recommend
-      replacing the drive);
+    - read errors on the drive, including files or folders it can't open
+      (the count is kept, and the status then recommends replacing the
+      drive);
     - files changed on the NAS since the last sync (normal, the next backup
       takes care of them);
     - files whose content differs with the same size and time ("unknown which
@@ -329,7 +359,8 @@ details live only in the configuration.
     The only write it offers is for read errors: "copy these N unreadable
     files again from the NAS? y/n". Changed files are left to the next run.
     Files with unknown correct side are listed with both paths and the commands
-    to copy in either direction; the user decides each one. Verify only runs when started (the status shows
+    to copy in either direction (shell-quoted, safe to paste); the user
+    decides each one. Verify only runs when started (the status shows
     each drive's last verify). It reads the whole drive: ~16–25 hours for BK-20A
     (~8.3 TiB at 100–160 MB/s), ~8–14 hours for a full 6 TB drive.
 
@@ -372,11 +403,11 @@ units:
 
 drives:
   BK-6A:  { disk_id: 7f3c…9a, last_seen: 2026-11-02T23:50, last_complete_run: 2026-11-02T23:50,
-            capacity: 5.46T, free: 0.34T, last_verify: null }
+            capacity: 5.46T, free: 0.34T, last_verify: null, read_errors: 0 }
   BK-6B:  { disk_id: 2b81…c4, last_seen: 2026-11-20T04:12, last_complete_run: 2026-11-20T04:12,
-            capacity: 5.46T, free: 0.92T, last_verify: null }
+            capacity: 5.46T, free: 0.92T, last_verify: null, read_errors: 0 }
   BK-20A: { disk_id: e09d…17, last_seen: 2026-11-18T11:30, last_complete_run: 2026-11-18T11:30,
-            capacity: 18.2T, free: 8.10T, last_verify: null }
+            capacity: 18.2T, free: 8.10T, last_verify: null, read_errors: 0 }
 ```
 
 A copy's `result` is the outcome of the last attempt: `ok`, `errors` (some NAS
@@ -404,7 +435,10 @@ home and copies.
   interrupted run leaves the last complete time, and the next run repeats the
   step.
 - Only a confirmed run (`y`) writes to the registry: new units, sizes and gone
-  units, for all rules. `n` and `--dry-run` write nothing. `baruch status` uses
+  units, for all rules. `n` and `--dry-run` write nothing. A run with no file
+  operations and no registry changes needs no `y`; it records only the drive
+  itself. A command that changes the registry takes the lock before it reads
+  the registry, so no change is lost to another command. `baruch status` uses
   the last run's scan and shows how old it is.
 - **Integrity:** one lock per NAS, held by the process (`flock`), so a crash
   never leaves a stale lock. Read-only commands (`status`, `find`) don't take
@@ -419,7 +453,9 @@ home and copies.
   emergencies; every run validates the file.
 - **Restore of the registry:** `baruch registry restore` takes the newest
   snapshot from the docked drive. Copies on other drives are marked
-  *unverified* until that drive is docked and its actual contents confirm them.
+  *unverified* until that drive is docked and its actual contents confirm them:
+  a copy on its home drive by a completed sync of the unit, any other copy by
+  its data being there; a copy whose data isn't there is dropped.
   Nothing is deleted on the strength of an unverified copy.
 - The registry is under `/volume1/homes/alex`, so the `home` rule backs it up
   as well.
@@ -432,12 +468,13 @@ home and copies.
 - **Plan and confirmation** (requirements 22–24): nothing happens before the
   user has seen the full plan and answered y, and large changes are flagged.
 - **Copy first:** a copy is only deleted from a drive that isn't the unit's home
-  once the home drive has a confirmed copy. Gone units are the exception: their
+  once the home drive has a confirmed copy at least as recent. Gone units are the exception: their
   data no longer exists on the NAS, so their copies are deleted in the plan,
   with a warning (requirement 23).
 - **Nothing unknown is deleted:** data no unit explains is only removed by
   `prune` (requirement 38).
-- **Mount check** before each unit (requirement 29).
+- **Mount check** before each unit and before the end-of-run writes
+  (requirements 29 and 31).
 
 ## Configuration
 
@@ -709,7 +746,7 @@ on the Mac:
 | NAS-specific part | On the NAS | In tests |
 | --------------------- | ---------------------------------------------- | ----------------------------------------------------------- |
 | Finding docked drives | Scan `/volumeUSB*/usbshare*` for label files | Configurable search path; drives are temp folders with a label file |
-| Free space | Read from the filesystem | Fake capacity per drive, also enforced on writes |
+| Free space | Read from the filesystem | Fake capacity per drive, computed from the drive's files |
 | Mount check | Path is a mount point and the label matches | Temp folder exists and the label matches |
 
 ## Testing

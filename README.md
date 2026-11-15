@@ -237,9 +237,15 @@ shows the plan for the docked drive:
   once the new home has a confirmed copy.
 - **Skipped units:** units that don't fit, units waiting for another drive, and
   units you left out with `--skip`.
-- **Scan errors:** folders on the NAS that couldn't be read. Nothing under them
-  is deleted on the drive, and a unit whose folder can't be read is shown as
-  *unreadable*, not gone.
+- **Scan errors:** folders or files on the NAS that couldn't be read. Nothing
+  under them is deleted on the drive, and a unit whose folder can't be read is
+  shown as *unreadable*, never gone or orphaned.
+- **Read errors on the drive:** folders on the drive that can't be read are
+  reported and left alone; the run then exits non-zero.
+- **Registry changes:** changes that touch no files on this drive, e.g. a unit
+  whose home changed because you edited the configuration, or a new unit whose
+  home is another drive. They need your `y` too. Only a run with neither file
+  operations nor registry changes skips the question.
 
 At the end, right above the question, comes a summary: the totals per unit
 (copy / overwrite / delete, in files and bytes), the path of the saved plan file
@@ -265,6 +271,10 @@ the rest should be backed up, leave it out:
 ```sh
 baruch run --skip "home/Photos"
 ```
+
+A skipped unit is left exactly as it is on the drive, even if its folder is
+gone on the NAS. Unit names you give to `--skip` must exist; a typo is refused,
+with similar names suggested.
 
 ## Use cases
 
@@ -403,14 +413,15 @@ were only on a forgotten drive are reported as on no drive.
 1. Copy back each drive with the restore script that every run writes to it:
 
    ```sh
-   sh /volumeUSB1/usbshare/.baruch/restore.sh         # shows what it would copy
+   sh /volumeUSB1/usbshare/.baruch/restore.sh         # lists what it would copy
    sh /volumeUSB1/usbshare/.baruch/restore.sh --run   # copies
    ```
 
    It needs only rsync, not Baruch: one `rsync -a` per rule folder on the
    drive, back to the rule's source as configured at the last run. The rule
    holding Baruch's own files goes first. It never deletes anything on the
-   NAS, and works wherever the drive is mounted. If the NAS has different paths
+   NAS, keeps files there that are newer than the drive's, and works wherever
+   the drive is mounted. If the NAS has different paths
    now, edit the targets in the script first.
 
 1. Without that drive: every drive carries `/.baruch/` with a registry snapshot
@@ -430,14 +441,15 @@ baruch verify
 This reads every file of the docked drive's units, compares checksums with the
 NAS, and reports three kinds of mismatch:
 
-- **Read errors on the drive:** here Baruch offers its only fix, "copy these N
-  unreadable files again from the NAS? y/n". Many errors are a sign to replace
+- **Read errors on the drive**, including files or folders it can't open: here
+  Baruch offers its only fix, "copy these N unreadable files again from the
+  NAS? y/n". The count is kept, and `baruch status` then recommends replacing
   the drive.
 - **Changed on the NAS since the last sync:** normal; the next run takes care of
   them.
 - **Same size and time, different content:** Baruch can't tell which side is
-  right. It lists both paths and the commands to copy in either direction, and
-  you decide each one.
+  right. It lists both paths and the commands to copy in either direction
+  (quoted, safe to paste), and you decide each one.
 
 A full verify reads the whole drive: ~16–25 hours for 8.3 TiB. The status shows
 each drive's last verify.
@@ -484,7 +496,7 @@ out.
 | --- | --- |
 | `--dry-run` | Show the plan and exit. Writes nothing at all. |
 | `--drive NAME` | Use this drive when several registered drives are docked (otherwise Baruch asks) |
-| `--skip UNIT` | Leave a unit out of this run; it stays *outdated*. Repeatable. |
+| `--skip UNIT` | Leave a unit out of this run; nothing of it changes on the drive. Repeatable; unknown names are refused. |
 
 Without a usable drive, `run` lists the mounted USB volumes and why each isn't
 used. Before each unit it checks that the drive is still mounted and its label
@@ -502,7 +514,9 @@ reserves. It lists what needs attention:
 - move suggestions;
 - orphaned data;
 - drives no longer configured that still hold copies;
-- drives not docked for longer than `stale_after`.
+- drives not docked for longer than `stale_after`;
+- drives whose last verify found read errors, with the recommendation to
+  replace them.
 
 It uses the last run's scan of the NAS and shows how old that is. It works
 while a run is in progress.

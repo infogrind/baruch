@@ -13,7 +13,7 @@ from pathlib import Path
 
 from baruch.drives import BARUCH_DIR, Docked, still_there
 from baruch.planner import CLEANUP, GONE, UnitOp
-from baruch.registry import ERRORS, INCOMPLETE, OK, Copy
+from baruch.registry import ERRORS, INCOMPLETE, OK, Copy, write_atomic
 
 RSYNC_PARTIAL = 23
 RSYNC_VANISHED = 24
@@ -28,8 +28,22 @@ class DriveGone(Exception):
     pass
 
 
-class DriveFull(Exception):
+class DriveError(Exception):
+    """Read or write errors on the drive: the run stops for this drive."""
+
+
+class DriveFull(DriveError):
     pass
+
+
+RSYNC_INTERRUPTED = 20
+
+
+def write_to_drive(path: Path, text: str) -> None:
+    """Write one of Baruch's files under /.baruch/ on a drive. Never creates
+    folders above it, so nothing lands in an empty mount point."""
+    path.parent.mkdir(exist_ok=True)
+    write_atomic(path, text, parents=False)
 
 
 def check_rsync(path: str) -> None:
@@ -117,22 +131,39 @@ def sync_unit(op: UnitOp, d: Docked, source: Path, rsync: str) -> UnitResult:
     code, err = run_rsync(
         rsync, source, dest, transfer, d.path / BARUCH_DIR / "partial"
     )
+    return classify(code, err)
+
+
+def classify(code: int, err: str) -> UnitResult:
+    """What rsync's exit code and messages mean for the unit.
+
+    Errors on the receiving side (the drive) stop the run. Files that are gone
+    on the NAS by the time rsync gets to them count as vanished. Anything else
+    reported by the sending side means files on the NAS couldn't be read."""
     lines = [line for line in err.splitlines() if line.strip()]
     if code == 0:
         return UnitResult(OK)
-    if code == RSYNC_VANISHED:
-        return UnitResult(OK, ["files vanished during copying:", *lines])
-    if code == RSYNC_PARTIAL and not _drive_trouble(lines):
-        return UnitResult(ERRORS, lines)
-    if any("No space left" in line for line in lines):
-        raise DriveFull("\n".join(lines))
-    raise RsyncError(f"rsync failed (exit {code}):\n" + "\n".join(lines))
-
-
-def _drive_trouble(lines: list[str]) -> bool:
-    return any(
-        "No space left" in line or "Read-only file system" in line for line in lines
-    )
+    if code == RSYNC_INTERRUPTED:
+        raise KeyboardInterrupt
+    full = [line for line in lines if "No space left" in line]
+    if full:
+        raise DriveFull("\n".join(full))
+    messages = [line for line in lines if line.startswith("rsync:")]
+    drive = [
+        line
+        for line in messages
+        if "[receiver]" in line or "[generator]" in line or "Read-only" in line
+    ]
+    if drive:
+        raise DriveError("errors writing to the drive:\n" + "\n".join(drive))
+    if code not in (RSYNC_PARTIAL, RSYNC_VANISHED):
+        raise RsyncError(f"rsync failed (exit {code}):\n" + "\n".join(lines))
+    vanished = [line for line in lines if line.startswith("file has vanished")]
+    vanished += [line for line in messages if "No such file or directory" in line]
+    unreadable = [line for line in messages if line not in vanished]
+    if unreadable:
+        return UnitResult(ERRORS, unreadable)
+    return UnitResult(OK, ["files vanished during copying:", *vanished])
 
 
 def _prune_empty(dest: Path) -> None:

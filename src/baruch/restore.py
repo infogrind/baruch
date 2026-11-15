@@ -12,11 +12,7 @@ import shlex
 from pathlib import Path
 
 from baruch.config import Config, Rule
-from baruch.drives import BARUCH_DIR
-from baruch.registry import write_atomic
 from baruch.timefmt import show
-
-SCRIPT = "restore.sh"
 
 HEADER = """\
 #!/bin/sh
@@ -29,9 +25,10 @@ HEADER = """\
 #   sh restore.sh          shows what would be copied, copies nothing
 #   sh restore.sh --run    copies
 #
-# Nothing on the NAS is ever deleted; files already there with the same name
-# are overwritten with the drive's version. Uses the rsync on the PATH (any
-# rsync works for this; set RSYNC=/path/to/rsync to choose one).
+# Nothing on the NAS is ever deleted, and files there that are newer than the
+# drive's version are kept (rsync --update). The dry run lists every file it
+# would copy. Uses the rsync on the PATH (any rsync works for this; set
+# RSYNC=/path/to/rsync to choose one).
 
 set -e
 DRIVE=$(cd "$(dirname "$0")/.." && pwd)
@@ -46,10 +43,10 @@ restore() {{  # rule folder on the drive, target folder on the NAS
     fi
     echo "== $DRIVE/$1/ -> $2/"
     if [ -n "$DRY" ]; then
-        "$RSYNC" -a -H -n --stats "$DRIVE/$1/" "$2/"
+        "$RSYNC" -a -H --update -n --itemize-changes "$DRIVE/$1/" "$2/"
     else
         mkdir -p "$2"
-        "$RSYNC" -a -H --stats "$DRIVE/$1/" "$2/"
+        "$RSYNC" -a -H --update --stats "$DRIVE/$1/" "$2/"
     fi
 }}
 
@@ -80,18 +77,13 @@ def script(config: Config, drive: str, root: Path, own_files: list[Path], now) -
     lines = [HEADER.format(drive=drive, when=show(now))]
     for rule in order(config, own_files):
         folder = root / rule.name
-        if folder.is_dir() and any(folder.iterdir()):
+        try:
+            has_data = folder.is_dir() and any(folder.iterdir())
+        except OSError:
+            has_data = True  # can't tell; the script skips it if it's not there
+        if has_data:
             lines.append(f'restore "{rule.name}" {shlex.quote(str(rule.source))}\n')
     lines.append(
         '\nif [ -n "$DRY" ]; then echo "Dry run finished: nothing was copied."; fi\n'
     )
     return "".join(lines)
-
-
-def write_script(
-    config: Config, drive: str, root: Path, own_files: list[Path], now
-) -> Path:
-    path = root / BARUCH_DIR / SCRIPT
-    write_atomic(path, script(config, drive, root, own_files, now))
-    path.chmod(0o755)
-    return path

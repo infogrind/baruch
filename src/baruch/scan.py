@@ -94,6 +94,10 @@ def _entry(st: os.stat_result, path: str) -> Entry | None:
     return None
 
 
+def _lstat(item: os.DirEntry) -> os.stat_result:
+    return item.stat(follow_symlinks=False)
+
+
 def scan_tree(root: Path, exclude: list[str]) -> TreeScan:
     out = TreeScan()
     files_unit = UnitScan(FILES_UNIT)
@@ -106,13 +110,27 @@ def scan_tree(root: Path, exclude: list[str]) -> TreeScan:
         if excluded(item.name, exclude):
             continue
         try:
-            st = item.stat(follow_symlinks=False)
+            st = _lstat(item)
         except OSError as e:
-            out.errors.append((item.name, e.strerror or str(e)))
+            # Unknown whether it's a folder or a file: never gone, never
+            # orphaned, nothing of that name deleted on the drive.
+            msg = e.strerror or str(e)
+            unit = UnitScan(item.name, unreadable=msg)
+            unit.errors.append((item.name, msg))
+            out.units[item.name] = unit
+            files_unit.errors.append((item.name, msg))
             continue
         entry = _entry(st, item.path)
         if entry is None:
             out.special += 1
+        elif entry.kind == DIR and item.name == FILES_UNIT:
+            out.errors.append(
+                (
+                    item.name,
+                    f"a folder named {FILES_UNIT} can't be backed up; rename it",
+                )
+            )
+            files_unit.errors.append((item.name, "reserved name"))
         elif entry.kind == DIR:
             unit = UnitScan(item.name)
             unit.entries[item.name] = entry
@@ -138,7 +156,7 @@ def _walk(path: Path, rel: str, exclude: list[str], unit: UnitScan, out: TreeSca
             continue
         child = f"{rel}/{item.name}"
         try:
-            st = item.stat(follow_symlinks=False)
+            st = _lstat(item)
         except OSError as e:
             unit.errors.append((child, e.strerror or str(e)))
             continue

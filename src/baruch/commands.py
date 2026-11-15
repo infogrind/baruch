@@ -6,6 +6,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import os
+import shlex
 import shutil
 import time
 from datetime import UTC, datetime
@@ -13,12 +14,21 @@ from pathlib import Path
 
 import yaml
 
+import baruch.execute as execute_mod
 from baruch import names
 from baruch.config import MARKER, Config, ConfigError, check, load
 from baruch.context import Context
-from baruch.drives import BARUCH_DIR, Docked, classify, docked, read_label, write_label
+from baruch.drives import (
+    BARUCH_DIR,
+    Docked,
+    classify,
+    docked,
+    read_label,
+    still_there,
+    write_label,
+)
 from baruch.execute import (
-    DriveFull,
+    DriveError,
     DriveGone,
     RsyncError,
     check_rsync,
@@ -52,7 +62,7 @@ from baruch.render import (
     reserve_line,
     suggestion_line,
 )
-from baruch.restore import write_script
+from baruch.restore import script as restore_script
 from baruch.scan import FILE, FILES_UNIT, TreeScan, scan_drive_root, scan_tree
 from baruch.sizes import human
 from baruch.starter import STARTER
@@ -200,22 +210,47 @@ def new_log(ctx: Context, drive: str) -> Path:
     return path
 
 
-def write_contents(ctx: Context, d: Docked) -> None:
+def contents_text(root: Path) -> str:
+    """All files and links on a drive, outside Baruch's own folder."""
     lines = []
-    for dirpath, dirnames, filenames in os.walk(d.path):
-        rel_dir = os.path.relpath(dirpath, d.path)
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel_dir = os.path.relpath(dirpath, root)
         if rel_dir == ".":
             dirnames[:] = [n for n in dirnames if n != BARUCH_DIR]
         for name in sorted(filenames) + sorted(
             n for n in dirnames if os.path.islink(os.path.join(dirpath, n))
         ):
             p = os.path.join(dirpath, name)
-            st = os.lstat(p)
+            try:
+                st = os.lstat(p)
+            except OSError:
+                continue
             rel = os.path.normpath(os.path.join(rel_dir, name))
             lines.append(f"{names.escape(rel)}\t{st.st_size}\t{int(st.st_mtime)}")
-    text = "\n".join(sorted(lines)) + "\n"
-    write_atomic(d.path / BARUCH_DIR / "contents.txt", text)
+    return "\n".join(sorted(lines)) + "\n"
+
+
+def write_drive_files(ctx, out, config, reg, d: Docked, now) -> None:
+    """The contents list (also kept on the NAS), the copy of the config, the
+    restore script and the registry snapshot. Only while the drive is still
+    there; a failed write (e.g. the drive is full) is reported, not fatal."""
+    text = contents_text(d.path)
     write_atomic(ctx.state_dir / "contents" / f"{d.name}.txt", text)
+    own = [ctx.config_dir, ctx.state_dir]
+    files = {
+        "contents.txt": text,
+        "config.yaml": config_path(ctx).read_text(encoding="utf-8"),
+        "restore.sh": restore_script(config, d.name, d.path, own, now),
+        "registry.yaml": dump(reg),
+    }
+    for name, content in files.items():
+        path = d.path / BARUCH_DIR / name
+        try:
+            execute_mod.write_to_drive(path, content)
+            if name == "restore.sh":
+                path.chmod(0o755)
+        except OSError as e:
+            out(f"Warning: couldn't write {path}: {e.strerror or e}")
 
 
 def write_scan_state(ctx: Context, plan: Plan, drive: str) -> None:
@@ -298,15 +333,15 @@ def cmd_run(ctx: Context, args) -> int:
     out = Out(ctx)
     config = get_config(ctx)
     store = store_of(ctx)
-    reg = get_registry(store)
     if not args.dry_run and not ctx.interactive:
         raise Fail(
             "`baruch run` needs a terminal: it shows the plan and asks before "
             "changing anything."
         )
-    d = choose_drive(ctx, out, reg, args.drive)
     if not args.dry_run:
         lock(ctx, store)
+    reg = get_registry(store)
+    d = choose_drive(ctx, out, reg, args.drive)
     rsync = ctx.host.rsync()
     try:
         check_rsync(rsync)
@@ -314,6 +349,14 @@ def cmd_run(ctx: Context, args) -> int:
         raise Fail(str(e)) from None
     capacity, free = ctx.host.disk_usage(d.path)
     nas = scan_nas(config)
+    skip = set(args.skip or [])
+    known = set(reg.units) | {
+        f"{rule}/{folder}" for rule, t in nas.items() if t for folder in t.units
+    }
+    for name in sorted(skip - known):
+        similar = names.similar(name, sorted(known))
+        hint = f" Did you mean: {', '.join(similar)}?" if similar else ""
+        raise Fail(f"--skip: no unit named {names.display(name)}.{hint}")
     disk, root_names = scan_disk(d.path, config)
     plan = make_plan(
         config=config,
@@ -324,11 +367,11 @@ def cmd_run(ctx: Context, args) -> int:
         nas=nas,
         disk=disk,
         root_names=root_names,
-        skip=set(args.skip or []),
+        skip=skip,
     )
     text = render_plan(plan, reg, d.path.name)
     out.raw(text)
-    tail = render_summary(plan) if not plan.empty else ""
+    tail = render_summary(plan) if plan.needs_answer else ""
     if args.dry_run:
         out.raw(tail)
         for w in plan.warnings:
@@ -338,7 +381,7 @@ def cmd_run(ctx: Context, args) -> int:
 
     log = new_log(ctx, d.name)
     log.write_text(text + tail + "".join(w + "\n" for w in plan.warnings))
-    if not plan.empty:
+    if plan.needs_answer:
         out.raw(tail)
         out(f"Plan saved to {log}")
         for w in plan.warnings:
@@ -419,7 +462,7 @@ def execute(ctx, out, config, reg, store, d, plan, rsync, log) -> int:
         out(str(e))
         _append(log, str(e))
         return 1
-    except (DriveFull, RsyncError) as e:
+    except (DriveError, RsyncError) as e:
         if current is not None and current.kind not in (CLEANUP, GONE):
             mark_incomplete(reg, current, d.name)
         store.save(reg)
@@ -431,6 +474,9 @@ def execute(ctx, out, config, reg, store, d, plan, rsync, log) -> int:
         if unit and not unit.copies:
             del reg.units[name]
     finish(ctx, out, config, reg, store, d, plan)
+    if plan.drive_errors and code == 0:
+        out("Some folders on the drive can't be read (see above): exit code 1.")
+        code = 1
     _append(log, "\n".join(messages) + f"\nfinished with exit code {code}\n")
     return code
 
@@ -442,28 +488,34 @@ def _append(log: Path, text: str) -> None:
 
 def finish(ctx, out, config, reg, store, d, plan) -> None:
     now = ctx.host.now()
-    write_contents(ctx, d)
-    shutil.copyfile(config_path(ctx), d.path / BARUCH_DIR / "config.yaml")
-    write_script(config, d.name, d.path, [ctx.config_dir, ctx.state_dir], now)
-    capacity, free = ctx.host.disk_usage(d.path)
+    mounted = still_there(ctx.host, d)
     drive = reg.drives[d.name]
-    drive.capacity, drive.free, drive.last_seen = capacity, free, now
-    complete = all(
-        u.copies.get(d.name) is not None and u.copies[d.name].result in (OK, ERRORS)
-        for name, u in reg.units.items()
-        if u.home == d.name and name not in plan.gone
-    )
-    if complete:
-        drive.last_complete_run = now
+    if mounted:
+        shutil.rmtree(d.path / BARUCH_DIR / "partial", ignore_errors=True)
+        capacity, free = ctx.host.disk_usage(d.path)
+        drive.capacity, drive.free, drive.last_seen = capacity, free, now
+        complete = all(
+            u.copies.get(d.name) is not None and u.copies[d.name].result in (OK, ERRORS)
+            for name, u in reg.units.items()
+            if u.home == d.name and name not in plan.gone
+        )
+        if complete and not plan.drive_errors:
+            drive.last_complete_run = now
     drop_unused_drives(reg, config)
     store.save(reg)
-    write_atomic(d.path / BARUCH_DIR / "registry.yaml", dump(reg))
     write_scan_state(ctx, plan, d.name)
+    if not mounted:
+        out(
+            f"{d.name} isn't mounted any more: nothing was written to it, and its "
+            "snapshot and contents list were not updated."
+        )
+        return
+    write_drive_files(ctx, out, config, reg, d, now)
     if plan.reserve_used:
         out(reserve_line(plan.reserve_used, plan.reserve))
         for s in plan.suggestions:
             out(suggestion_line(s))
-    used = capacity - free
+    used, free = drive.capacity - drive.free, drive.free
     out(f"{d.name}: {human(used)} used, {human(free)} free.")
     out("safe to eject in DSM")
 
@@ -558,6 +610,11 @@ def cmd_status(ctx: Context, args) -> int:
         if name not in config.drives:
             n = sum(1 for u in reg.units.values() if name in u.copies)
             out(f"{name}: not in the configuration, still holds {n} copies")
+        if drive.read_errors:
+            out(
+                f"{name}: {drive.read_errors} read errors at the last verify: "
+                "consider replacing it"
+            )
         if drive.last_seen and now - drive.last_seen > config.settings.stale_after:
             out(f"{name}: not docked for {(now - drive.last_seen).days} days")
         conf = config.drives.get(name)
@@ -637,6 +694,7 @@ def cmd_move_set(ctx: Context, args) -> int:
     out = Out(ctx)
     config = get_config(ctx)
     store = store_of(ctx)
+    lock(ctx, store)
     reg = get_registry(store)
     name = args.unit
     unit = reg.units.get(name)
@@ -661,7 +719,6 @@ def cmd_move_set(ctx: Context, args) -> int:
             f"{target} is not in the spread list of rule {rule.name}: add it to the "
             "list first."
         )
-    lock(ctx, store)
     scan = read_scan_state(ctx)
     size = (scan.get("units") or {}).get(name, {}).get("size")
     if size is None:
@@ -688,6 +745,7 @@ def cmd_move_set(ctx: Context, args) -> int:
 def cmd_register(ctx: Context, args) -> int:
     out = Out(ctx)
     store = store_of(ctx)
+    lock(ctx, store)
     reg = get_registry(store)
     try:
         config = load(config_path(ctx))
@@ -732,7 +790,6 @@ def cmd_register(ctx: Context, args) -> int:
         if not out.ask(f"Overwrite it with a new label for {name}?"):
             out("Nothing changed.")
             return 0
-    lock(ctx, store)
     label = write_label(disk.path, name)
     capacity, free = ctx.host.disk_usage(disk.path)
     reg.drives[name] = Drive(label.disk_id, capacity, free, last_seen=ctx.host.now())
@@ -751,6 +808,7 @@ def cmd_forget(ctx: Context, args) -> int:
     out = Out(ctx)
     config = get_config(ctx)
     store = store_of(ctx)
+    lock(ctx, store)
     reg = get_registry(store)
     name = args.name
     drive = reg.drives.get(name)
@@ -765,7 +823,6 @@ def cmd_forget(ctx: Context, args) -> int:
     if not out.ask(f"Forget {name}?"):
         out("Nothing changed.")
         return 0
-    lock(ctx, store)
     for n in held:
         reg.units[n].copies.pop(name, None)
     drive.disk_id = None
@@ -790,9 +847,9 @@ def cmd_prune(ctx: Context, args) -> int:
     out = Out(ctx)
     config = get_config(ctx)
     store = store_of(ctx)
+    lock(ctx, store)
     reg = get_registry(store)
     d = choose_drive(ctx, out, reg, args.drive)
-    lock(ctx, store)
     capacity, free = ctx.host.disk_usage(d.path)
     disk, root_names = scan_disk(d.path, config)
     plan = make_plan(
@@ -841,10 +898,7 @@ def cmd_prune(ctx: Context, args) -> int:
         if not unit.copies:
             del reg.units[n]
     store.save(reg)
-    write_contents(ctx, d)
-    write_script(
-        config, d.name, d.path, [ctx.config_dir, ctx.state_dir], ctx.host.now()
-    )
+    write_drive_files(ctx, out, config, reg, d, ctx.host.now())
     out(f"Deleted {len(delete)} items ({human(total)}).")
     return 0
 
@@ -878,9 +932,9 @@ def cmd_verify(ctx: Context, args) -> int:
     out = Out(ctx)
     config = get_config(ctx)
     store = store_of(ctx)
+    lock(ctx, store)
     reg = get_registry(store)
     d = choose_drive(ctx, out, reg, args.drive)
-    lock(ctx, store)
     read_errors: list[tuple[str, str]] = []  # rule, rel
     changed: list[str] = []
     unclear: list[tuple[Path, Path]] = []
@@ -903,8 +957,11 @@ def cmd_verify(ctx: Context, args) -> int:
             nas_file = rule.source / rel
             try:
                 st = os.stat(drive_file)
-            except FileNotFoundError:
+            except (FileNotFoundError, NotADirectoryError):
                 changed.append(f"{rule.name}/{rel}")
+                continue
+            except OSError:
+                read_errors.append((rule.name, rel))
                 continue
             if st.st_size != e.size or int(st.st_mtime) != e.mtime:
                 changed.append(f"{rule.name}/{rel}")
@@ -934,8 +991,10 @@ def cmd_verify(ctx: Context, args) -> int:
         )
         for nas_file, drive_file in unclear:
             out(f"  {names.display(str(nas_file))}")
-            out(f'    NAS → drive: rsync -a "{nas_file}" "{drive_file}"')
-            out(f'    drive → NAS: rsync -a "{drive_file}" "{nas_file}"')
+            nas_q = names.display(shlex.quote(str(nas_file)))
+            drive_q = names.display(shlex.quote(str(drive_file)))
+            out(f"    NAS → drive: rsync -a {nas_q} {drive_q}")
+            out(f"    drive → NAS: rsync -a {drive_q} {nas_q}")
     if read_errors:
         out(f"{len(read_errors)} files can't be read on {d.name}:")
         for rule_name, rel in read_errors:
@@ -963,6 +1022,7 @@ def cmd_verify(ctx: Context, args) -> int:
     if not (changed or unclear or read_errors):
         out(f"All files of {d.name}'s units match the NAS.")
     reg.drives[d.name].last_verify = ctx.host.now()
+    reg.drives[d.name].read_errors = len(read_errors)
     store.save(reg)
     return 0
 

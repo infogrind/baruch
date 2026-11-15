@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from baruch.config import Config, Rule
-from baruch.registry import INCOMPLETE, Registry
+from baruch.registry import INCOMPLETE, SKIPPED, Registry
 from baruch.scan import DIR, FILES_UNIT, TreeScan, UnitScan, excluded
 from baruch.sizes import human, percent
 
@@ -45,6 +45,7 @@ class UnitOp:
     placement: bool = False  # a first copy: needs room above the reserve
     note: str = ""
     loss: float = 0.0  # share of the unit's bytes on the drive that are deleted
+    stale: bool = False  # recorded copy is skipped, incomplete or unverified
 
     @property
     def transfer(self) -> list[str]:
@@ -108,6 +109,8 @@ class Plan:
     nowhere: list[tuple[str, int]] = field(default_factory=list)
     markers_missing: list[Rule] = field(default_factory=list)
     scan_errors: list[tuple[str, str]] = field(default_factory=list)
+    drive_errors: list[tuple[str, str]] = field(default_factory=list)
+    home_old: dict[str, str | None] = field(default_factory=dict)
     unreadable: list[tuple[str, str]] = field(default_factory=list)
     orphans: list[Orphan] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -118,6 +121,37 @@ class Plan:
     @property
     def empty(self) -> bool:
         return not self.ops
+
+    def registry_changes(self) -> list[str]:
+        """Changes to the registry beyond the unit operations, shown in the
+        plan; they also need a y."""
+        out = []
+        for name, home in sorted(self.home_changes.items()):
+            old = self.home_old.get(name) or "none"
+            if any(op.unit == name for op in self.ops):
+                continue
+            out.append(f"{name}: home {old} → {home or 'none (placed again)'}")
+        for name, home in sorted(self.new_units.items()):
+            if home and home != self.drive:
+                out.append(f"{name}: new unit, home {home}")
+        for name in self.drop_copies:
+            out.append(f"{name}: copy record on {self.drive} dropped (no data here)")
+        for name in self.confirm_unverified:
+            out.append(f"{name}: copy on {self.drive} confirmed")
+        op_units = {op.unit for op in self.ops}
+        for name in self.gone:
+            if name not in op_units and name not in self.drop_copies:
+                out.append(f"{name}: gone on the NAS (no copy on {self.drive})")
+        return out
+
+    @property
+    def needs_answer(self) -> bool:
+        return bool(
+            self.ops
+            or self.registry_changes()
+            or self.record_skipped
+            or any(h is None for h in self.new_units.values())
+        )
 
     @property
     def reserve_used(self) -> int:
@@ -196,6 +230,9 @@ def make_plan(
             plan.scan_errors.append((rule.name, scan.root_error))
             continue
         disk_scan = disk.get(rule.name) or TreeScan()
+        if disk_scan.root_error:
+            plan.drive_errors.append((rule.name, disk_scan.root_error))
+            continue
         for rel, msg in scan.errors:
             plan.scan_errors.append((f"{rule.name}/{rel}", msg))
         known = {name.split("/", 1)[1] for name in reg.units_of_rule(rule.name)}
@@ -223,12 +260,14 @@ def make_plan(
                 explained.add(full)
                 continue
 
-            # Unverified copies on this drive are confirmed or dropped.
-            if ru and drive in ru.copies and ru.copies[drive].unverified:
-                if has_data(du):
-                    plan.confirm_unverified.append(full)
-                else:
-                    plan.drop_copies.append(full)
+            if du is not None and du.errors:
+                plan.drive_errors.extend((f"{rule.name}/{p}", m) for p, m in du.errors)
+                explained.add(full)
+                continue
+            if full in skip and nu is None:
+                plan.skipped.append((full, "skipped on request"))
+                explained.add(full)
+                continue
 
             if nu is None:  # gone on the NAS
                 plan.gone.append(full)
@@ -256,12 +295,26 @@ def make_plan(
                 home = None
             if ru is None:
                 plan.new_units[full] = home
+            if full in plan.home_changes:
+                plan.home_old[full] = ru.home if ru else None
+
+            # Unverified copies: a home copy is confirmed by its sync; another
+            # one by its data being here. Without data the record goes.
+            here = ru.copies.get(drive) if ru else None
+            if here and here.unverified:
+                if not has_data(du):
+                    plan.drop_copies.append(full)
+                elif home != drive:
+                    plan.confirm_unverified.append(full)
 
             if full in skip:
                 plan.skipped.append((full, "skipped on request"))
                 explained.add(full)
-                if home == drive and ru and drive in ru.copies:
-                    plan.record_skipped.append(full)
+                if home == drive and here and has_data(du):
+                    probe = UnitOp(full, rule.name, SYNC, G_SPREAD, nu.size)
+                    diff(nu, du, probe)
+                    if probe.transfer or probe.delete:
+                        plan.record_skipped.append(full)
                 continue
 
             if home == drive:
@@ -279,6 +332,10 @@ def make_plan(
                         else (G_PINNED if rule.pinned else G_SPREAD)
                     )
                     op = UnitOp(full, rule.name, kind, group, nu.size)
+                    op.stale = recorded and (
+                        ru.copies[drive].result in (SKIPPED, INCOMPLETE)
+                        or ru.copies[drive].unverified
+                    )
                     diff(nu, du, op)
                     op.files = nu.files
                     op.loss = op.delete_bytes / du.size if du.size else 0.0
@@ -294,7 +351,13 @@ def make_plan(
                 if has_data(du) and ru and drive in ru.copies:
                     explained.add(full)
                     home_copy = ru.copies.get(home)
-                    if home_copy and home_copy.confirmed:
+                    here_synced = ru.copies[drive].synced
+                    newer = here_synced is None or (
+                        home_copy is not None
+                        and home_copy.synced is not None
+                        and home_copy.synced >= here_synced
+                    )
+                    if home_copy and home_copy.confirmed and newer:
                         why = (
                             f"moved to {home}"
                             if not rule.pinned
@@ -316,7 +379,7 @@ def make_plan(
     # Existing units on this drive: incomplete, pinned, spread; largest first.
     for op in sorted(existing, key=lambda o: (o.group, -o.size, o.unit)):
         if not (op.transfer or op.delete):
-            if op.kind == UNTRACKED or op.group == G_INCOMPLETE:
+            if op.kind == UNTRACKED or op.group == G_INCOMPLETE or op.stale:
                 plan.ops.append(op)  # recorded on y, even without file changes
             else:
                 plan.in_sync.append(op.unit)
@@ -430,7 +493,7 @@ def _orphans(plan, config, reg, drive, disk, root_names, explained):
         if any(r.name == name for r in config.rules) and plan_rule_blocked(plan, name):
             continue
         for folder, du in sorted((scan.units if scan else {}).items()):
-            if not has_data(du):
+            if not has_data(du) or excluded(folder, exclude):
                 continue
             full = f"{name}/{folder}"
             if full in explained:
@@ -517,13 +580,9 @@ def suggest_moves(config, reg, drive, need, sizes) -> list[Suggestion]:
         )
         if size > 0:
             candidates.append((newest, -size, name, rule, size))
-    candidates.sort()
     taken: dict[str, int] = {}
-    out: list[Suggestion] = []
-    freed = 0
-    for newest, _, name, rule, size in candidates:
-        if freed >= need:
-            break
+
+    def destination(rule, size):
         for target in rule.spread:
             if target == drive:
                 continue
@@ -531,10 +590,25 @@ def suggest_moves(config, reg, drive, need, sizes) -> list[Suggestion]:
             rec = reg.active_drive(target)
             if conf is None or rec is None:
                 continue
-            room = rec.free - conf.reserve(rec.capacity) - taken.get(target, 0)
-            if room >= size:
-                taken[target] = taken.get(target, 0) + size
-                out.append(Suggestion(name, target, size, newest))
-                freed += size
-                break
+            if rec.free - conf.reserve(rec.capacity) - taken.get(target, 0) >= size:
+                return target
+        return None
+
+    # One unit that's enough on its own, the one unchanged for longest...
+    for newest, _, name, rule, size in sorted(candidates):
+        if size >= need:
+            target = destination(rule, size)
+            if target:
+                return [Suggestion(name, target, size, newest)]
+    # ...otherwise the largest first, so it takes the fewest units.
+    out: list[Suggestion] = []
+    freed = 0
+    for newest, _, name, rule, size in sorted(candidates, key=lambda c: (c[1], c[0])):
+        if freed >= need:
+            break
+        target = destination(rule, size)
+        if target:
+            taken[target] = taken.get(target, 0) + size
+            out.append(Suggestion(name, target, size, newest))
+            freed += size
     return out
