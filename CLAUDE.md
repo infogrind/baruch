@@ -81,8 +81,7 @@ proposing designs.
   of space mid-unit is simulated by replacing `execute.run_rsync`.
 - Test data is built in test code (`env.nas.add_show`, `add`, `replace`,
   `delete`, `rename`, `mark`, `remove_marker`). Content is derived from path +
-  version number, never zero-filled; nothing generated is committed. YAML test
-  data descriptions in `tests/data/` (spec) aren't implemented yet.
+  version number, never zero-filled; nothing generated is committed.
 - Odd file names (NFC/NFD umlauts, invalid UTF-8, special characters, `@eaDir`,
   symlinks, unreadable files): tests the Mac's file system can't represent are
   skipped on macOS and run on Linux CI.
@@ -93,5 +92,3 @@ proposing designs.
   without asking.
 - Check free space of the 20 TB drive (ext4, confirmed) and the layout of
   Hyper Backup's task folder on it.
-- `README.md` still describes the old design and must be rewritten from the
-  spec.

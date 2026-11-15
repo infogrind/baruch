@@ -766,59 +766,40 @@ the `PATH`.
    temp folder, with real rsync and the real scanner. Tests "dock" drives in
    sequence, answer the plan's question, and check the result.
 
-**Test data descriptions** (in `tests/data/`) describe only the starting state.
-A helper builds the tree in a temp folder, in milliseconds. Nothing generated is
-stored in the repo.
-
-```yaml
-scale: 1MB = 1TiB                # same proportions as mynas
-tree:
-  archive/movies: { folders: 40, size: 7.5MB }
-  archive/tv:
-    - { name: "Show A", seasons: 5, episodes: 10, size: 1.2MB }
-    - { name: "Show B", seasons: 1, episodes: 8,  size: 0.1MB }
-    - { generate: 60, total: 7.8MB }        # shows with random sizes
-  homes/alex: { files: 200, size: 0.2MB }
-```
-
-- Drive capacities are scaled the same way (BK-6A = 5.46 MB). Free space in
-  tests is computed from the files' sizes against the fake capacity, not from
-  the real filesystem, whose block overhead dominates at this scale. Running
-  out of space mid-unit is tested in logic tests with a fake rsync runner, and
-  end to end in one Linux CI test on a small real filesystem with a fixed
-  size.
-- File content is derived from path + version number and timestamps are fixed,
-  so every version is really different content. No zero-filled files.
-- A few descriptions cover the starting states, e.g. `base.yaml`,
-  `nearly_full.yaml`, `odd_names.yaml`.
-
-**Changes happen in the test code**, through helpers on the fake NAS, so
-multi-step scenarios read top to bottom:
+**Test data is built in the test code**, through helpers on the fake NAS
+(`tests/support.py`), so each test shows its starting state and multi-step
+scenarios read top to bottom. Nothing generated is stored in the repo.
 
 ```python
-def test_replaced_episode_is_synced(nas, drives, run):
-    nas.build("base.yaml")
-    bk6a = drives.register("BK-6A", capacity="5.46MB")
-    run(dock=bk6a, answer="y")
+def test_second_run_lists_each_changed_file(env):
+    drive = setup_movies(env)  # a few movies, a pinned rule, BK-20A registered
+    env.backup(drive)  # dock, run, answer y, undock
 
-    nas.replace("archive/tv/Show A/Season 1/S01E01.mkv")  # version 2
-    run(dock=bk6a, answer="y")
+    env.nas.replace("archive/movies/Heat (1995)/S01E01.mkv")  # version 2
+    env.nas.delete("archive/movies/Heat (1995)/S01E02.mkv")
+    r = env.backup(drive)
 
-    assert bk6a.read("tv/Show A/Season 1/S01E01.mkv") == nas.read(
-        "archive/tv/Show A/Season 1/S01E01.mkv"
-    )
+    assert "~ Heat (1995)/S01E01.mkv" in r.out
+    assert "- Heat (1995)/S01E02.mkv" in r.out
 ```
 
 | Call | What changes | Purpose |
 | ---------------------------------- | -------------------------------- | ------------------------------------------------------------------ |
-| `nas.replace(ep)` | Content and timestamp, same size | Normal case |
-| `nas.replace(ep, size="+30%")` | Size too | Quality upgrade by Radarr/Sonarr |
-| `nas.replace(ep, keep_mtime=True)` | Content only | Documents the limit of rsync's size-and-timestamp check: not detected by a run, found by verify |
+| `nas.replace(f)` | Content and timestamp, same size | Normal case |
+| `nas.replace(f, size=…)` | Size too | Quality upgrade by Radarr/Sonarr |
+| `nas.replace(f, keep_mtime=True)` | Content only | Documents the limit of rsync's size-and-timestamp check: not detected by a run, found by verify |
 
-Further helpers: `nas.add`, `nas.delete`, `nas.rename`, `nas.add_show`,
-`nas.remove_marker`.
+Further helpers: `nas.add`, `nas.add_show`, `nas.delete`, `nas.rename`,
+`nas.mkdir`, `nas.mark`, `nas.remove_marker`.
 
-**Odd file names** (`odd_names.yaml`), based on real cases on the NAS:
+- File content is derived from path + version number and timestamps are fixed,
+  so every version is really different content. No zero-filled files.
+- Sizes are small (bytes to a few hundred KB). Drive capacities are set per
+  test. Free space is computed from the files on the fake drive against its
+  fake capacity, not from the real filesystem. Running out of space mid-unit
+  is tested by replacing rsync's result with a disk-full error.
+
+**Odd file names** (`tests/e2e/test_names.py`), based on real cases on the NAS:
 
 - umlauts in both Unicode encodings (NFC and NFD), and a name that isn't valid
   UTF-8;
@@ -830,9 +811,10 @@ The Mac's file system can't create invalid UTF-8 names and handles the two
 umlaut encodings differently from ext4, so those tests are skipped on macOS and
 run only on Linux in GitHub Actions.
 
-Other simulated failures: a broken drive by deleting its temp folder, a drive
-vanishing mid-run by removing its label between units, read errors by a file
-that can't be read.
+Other simulated failures: a forgotten or unknown drive, a drive vanishing
+mid-run (between units and during rsync), unreadable files and folders on
+both sides, rsync's error messages for drive write errors and vanished files,
+and Ctrl-C.
 
 ## Later (not planned now)
 
@@ -843,8 +825,6 @@ that can't be read.
 - Pinning one rule to several drives (one unit per drive, e.g.
   `movies@BK-20A`).
 - Notifications (DSM or email) at the end of a run.
-- A `snapshot` command that records the NAS's real structure (names and sizes,
-  names anonymised) as a test data description.
 - Encryption of the drives (not needed while they stay at home).
 
 ## Open points
