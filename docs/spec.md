@@ -823,4 +823,3 @@ that can't be read.
   SMART tests work through the dock.
 - Measure how long a full scan of the NAS takes (file count), since every run
   does one.
-- Create the GitHub repo infogrind/baruch.

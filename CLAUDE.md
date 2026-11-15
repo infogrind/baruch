@@ -89,8 +89,8 @@ proposing designs.
 
 ## Open points
 
-- GitHub repo `infogrind/baruch` not created yet. Don't push or create remote
-  resources without asking.
+- GitHub repo: `infogrind/baruch` (public). Don't push or create releases
+  without asking.
 - Check free space of the 20 TB drive (ext4, confirmed) and the layout of
   Hyper Backup's task folder on it.
 - `README.md` still describes the old design and must be rewritten from the
