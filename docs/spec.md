@@ -823,10 +823,47 @@ and Ctrl-C.
   sizes are offered as a rename (instant on the drive) instead of a recopy.
 - Rolling verify: each run also verifies a slice of the units not verified for
   the longest time.
-- Pinning one rule to several drives (one unit per drive, e.g.
-  `movies@BK-20A`).
+- Several copies of a rule's units, each on a different drive (see
+  "Several copies" below).
 - Notifications (DSM or email) at the end of a run.
 - Encryption of the drives (not needed while they stay at home).
+
+### Several copies
+
+Two copies of a source protect against a broken drive, not against deletions:
+a unit gone on the NAS is deleted from every copy as each drive is docked.
+Two ways to get there:
+
+**Option 1: `copies:` with one entry per copy.** Each entry is a drive (that
+copy pinned) or a list of drives (that copy spread over them, in order of
+preference). `pin: X` and `spread: [A, B]` stay as shorthand for one copy.
+
+```yaml
+- name: tv
+  source: /volume1/archive/tv
+  copies:
+    - [BK-6A, BK-6B]   # first copy, spread
+    - BK-30A           # second copy, all on one drive
+```
+
+- Each unit gets one home per copy (`homes:` instead of `home:` in the
+  registry). Each copy is placed on its own. A drive may appear in only one
+  copy of a rule (`config check`), so two copies never share a disk; a home's
+  copy follows from which entry contains the drive.
+- Copy first applies per copy: an old copy is deleted only once the new home
+  *of the same copy* has a confirmed copy; the other copy doesn't count.
+- The status shows units below their number of copies ("1 of 2 copies").
+- `move set` finds the copy from the target drive. `drive forget` loses only
+  that drive's copies. Removing a copy from the config makes its data
+  orphaned (removed by `prune`). Adding one means first copies of every unit.
+- Capacity: every copy needs the full size of the source.
+
+**Option 2: two rules with the same source**, e.g. `tv` and `tv2`, each with
+its own placement, units and folder on the drives. Exactly equal sources
+would be allowed (nesting still isn't), and `config check` would refuse a
+drive that appears in both rules. Almost no new code, but Baruch doesn't know
+the two are copies of each other: no "1 of 2 copies" in the status, moves
+affect one rule only, and each run scans the source twice.
 
 ## Open points
 
