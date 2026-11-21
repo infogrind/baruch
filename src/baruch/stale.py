@@ -38,7 +38,7 @@ class Item:
     unit: str | None = None  # None for unexplained data
     kind: str | None = None  # MOVED, NO_HOME or GONE for stale data
     home: str | None = None
-    only_files: int = 0  # files that exist neither on the NAS nor elsewhere
+    only_files: int = 0  # files on no other drive: this is their only backup
     only_bytes: int = 0
     in_progress: bool = False  # this drive's record says the sync didn't finish
     # Where else Baruch believes this unit's files are, as last seen: the
@@ -118,7 +118,15 @@ def classify(
             if other != drive:
                 drive_index[other] = set()
                 _index(c.contents.folders.get(top), drive_index[other])
-        elsewhere = nas_index.union(*drive_index.values())
+        # "Only here" means no other backup: the NAS doesn't count, it's what
+        # the backup is for (a renamed folder isn't backed up until synced).
+        elsewhere = set().union(*drive_index.values())
+        # Other units on this drive count too (a renamed folder synced here).
+        here_units: dict[tuple, set[str]] = {}
+        for f, u in tree.units.items():
+            for rel, e in unit_files(u).items():
+                key = (os.path.basename(rel), e.size, e.mtime)
+                here_units.setdefault(key, set()).add(f)
 
         for folder, du in sorted(tree.units.items()):
             if not du.entries:
@@ -153,11 +161,11 @@ def classify(
                 item.kind, item.home = MOVED, home
                 item.action, item.reason = _release(unit, home, rec, reg, caches)
 
-            only = {
-                rel: e
-                for rel, e in files.items()
-                if (os.path.basename(rel), e.size, e.mtime) not in elsewhere
-            }
+            only = {}
+            for rel, e in files.items():
+                key = (os.path.basename(rel), e.size, e.mtime)
+                if key not in elsewhere and not here_units.get(key, set()) - {folder}:
+                    only[rel] = e
             item.only_files = len(only)
             item.only_bytes = sum(e.size for e in only.values())
             keys = {(os.path.basename(r), e.size, e.mtime) for r, e in files.items()}

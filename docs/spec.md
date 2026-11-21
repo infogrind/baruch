@@ -559,11 +559,13 @@ details live only in the configuration.
     leaves a record claiming a complete copy. If a gone unit's entry is then
     removed while part of its data is still on the drive, that data is
     unexplained data, which Baruch never deletes. Every unit line in `prune`'s plan shows
-    "N files only here": files of the unit that exist neither on the NAS nor
-    in any other drive's cached contents. A file counts as existing elsewhere
-    if a file with the same name, size and modification time is anywhere in
-    the same rule there, so a renamed folder whose files are all in the new
-    one counts as 0. Each unit line also says where Baruch believes the
+    "N files only here": files of the unit that have no other backup: they're
+    in no other drive's cached contents and in no other unit on this drive.
+    The NAS doesn't count, since it's what the backup is for: a renamed
+    folder's old copy keeps its files "only here" until the new folder is
+    backed up somewhere. A file counts as backed up elsewhere if a file with
+    the same name, size and modification time is anywhere in the same rule
+    there, so once the renamed folder is synced, its old copy counts as 0. Each unit line also says where Baruch believes the
     files are besides this drive, as last seen: the NAS, and each drive with
     when it was last seen ("also on BK-6B, last seen 2026-10-01", or "on no
     other drive"). The count comes from the cache, so it's only as current as
@@ -1146,6 +1148,23 @@ the `PATH`.
 1. **End-to-end tests:** a generated fake NAS and two or three fake drives in a
    temp folder, with real rsync and the real scanner. Tests "dock" drives in
    sequence, answer the plan's question, and check the result.
+1. **Fuzzing** (`tests/fuzz/`): `hypothesis` generates sequences of what a
+   user and bad luck can do (edit the NAS, back up, prune, move, change the
+   config, crash or interrupt rsync, fill the disk, forget a drive, roll back
+   or lose Baruch's state) and shrinks any failure to the shortest sequence,
+   printed as code. Derandomized by default, so every run and CI tries the
+   same sequences; `BARUCH_FUZZ=explore` runs many more with random seeds,
+   `--hypothesis-seed=N` a given one, and a printed `@reproduce_failure` line
+   replays one exactly.
+
+**The lost-data check.** Every Baruch command a test runs
+(`tests/support.py`, `Env.run`) is followed by a check that fails the test if
+the NAS changed, if anything was written into an empty mount point, if a file
+version vanished from the NAS and every drive, or if the last backup of a file
+the NAS still has vanished, unless the command's output named it beforehand
+(listed as a deletion or overwrite in a run's plan, or counted as "files only
+here" in prune's). Files are compared by content within their rule, so a
+renamed folder copied again isn't a loss.
 
 **Test data is built in the test code**, through helpers on the fake NAS
 (`tests/support.py`), so each test shows its starting state and multi-step

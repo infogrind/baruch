@@ -235,6 +235,7 @@ def test_gone_unit_is_pruned_and_its_entry_removed(env):
 
 
 def test_prune_keeps_a_gone_unit_that_came_back(env, monkeypatch):
+    env.check_loss = False  # the test itself changes the NAS mid-command
     a, _ = setup(env)
     env.backup(a)
     env.nas.delete(f"{TV}/Wire")
@@ -328,3 +329,22 @@ def test_prune_says_when_a_unit_is_on_no_other_drive(env):
     r = prune(env, a, answers="n")
 
     assert "(on no other drive)" in r.out
+
+
+# Found by the fuzzer
+
+
+def test_a_renamed_folder_not_backed_up_yet_keeps_its_old_copy_warned(env):
+    """The NAS doesn't count as a copy for "files only here": it's what the
+    backup is for. Pruning the old folder of a renamed show before the new
+    one is backed up anywhere would leave it with no backup."""
+    a, b = setup(env)
+    env.config(rules=[spread("tv", TV, ["BK-6B", "BK-6A"])], drives=DRIVES)
+    env.backup(b)  # Lost and Wire on BK-6B
+    env.nas.rename(f"{TV}/Wire", f"{TV}/The Wire")
+    env.backup(a)  # The Wire's home is BK-6B, not synced yet
+
+    r = prune(env, b, answers="n")
+
+    assert "tv/Wire: gone on the NAS" in r.out and "2 files only here" in r.out
+    assert "exist on no other drive" in r.out

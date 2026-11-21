@@ -91,6 +91,13 @@ proposing designs.
   folders on a "shelf", docked by symlinking them into the USB search folder;
   free space is computed from their files against a fake capacity. Running out
   of space mid-unit is simulated by replacing `execute.run_rsync`.
+- Every `env.run` in a test is followed by the lost-data check (`Env.run` in
+  `tests/support.py`): NAS unchanged, no write into an empty mount point, no
+  file version or last backup lost unless the output named it. Opt out only
+  for tests that change the NAS mid-command themselves (`env.check_loss`).
+- Fuzzing (`tests/fuzz/`, hypothesis): random sequences of user actions and
+  faults, derandomized by default; `BARUCH_FUZZ=explore` for more. Turn any
+  failure it finds into an ordinary regression test as well.
 - Test data is built in test code (`env.nas.add_show`, `add`, `replace`,
   `delete`, `rename`, `mark`, `remove_marker`). Content is derived from path +
   version number, never zero-filled; nothing generated is committed.

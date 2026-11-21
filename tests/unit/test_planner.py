@@ -429,7 +429,7 @@ def test_home_not_registered_holds():
     assert item.action == stale.HOLD and "isn't registered" in item.reason
 
 
-def test_files_only_here_ignores_renames_but_counts_deleted_files():
+def _renamed(caches):
     cfg = config(TV, RES)
     reg = registry({"BK-6A": 1000, "BK-6B": 1000}, {"tv/New Name": "BK-6B"})
     reg.homes["tv/Old Name"] = "BK-6A"  # gone on the NAS: renamed
@@ -442,9 +442,17 @@ def test_files_only_here_ignores_renames_but_counts_deleted_files():
         contents=data,
         records={},
         nas=nas_scan,
-        caches={},
+        caches=caches,
     )
     assert item.kind == stale.GONE
+    return item
+
+
+def test_a_renamed_folder_counts_only_once_it_is_backed_up_somewhere():
+    # The NAS doesn't count: it's what the backup is for.
+    assert _renamed({}).only_files == 2
+    synced = cache_of("bk-6b", drive_scan(tv={"New Name": {"e1": (100, 5)}}), {})
+    item = _renamed({"BK-6B": synced})
     assert (item.only_files, item.only_bytes) == (1, 7)
 
 

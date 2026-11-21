@@ -792,10 +792,12 @@ It's all or nothing. To keep one unit, answer `n`; if it's gone on the NAS by
 mistake, restore its folder there first (then it isn't gone any more) and prune
 again. Before each unit, `prune` checks that the same drive is still mounted.
 
-Each unit in the plan shows how many of its files exist nowhere else, neither
-on the NAS nor on another drive ("214 files only here"; a file with the same
-name, size and time anywhere in the same rule counts as existing, so a renamed
-folder that was copied again shows 0), and the summary above
+Each unit in the plan shows how many of its files have no other backup, on
+another drive or in another folder of this one ("214 files only here"). The NAS
+doesn't count: it's what the backup is for. A file with the same name, size and
+time anywhere in the same rule counts as backed up, so a renamed folder shows 0
+once its new name has been backed up, and every file until then. The summary
+above
 the question adds them up. Below it, the plan says where Baruch believes the
 other copies are, and when it last saw each of those drives:
 
@@ -872,7 +874,11 @@ uv run ruff check .
 ```
 
 Tests run on the Mac and on Linux in GitHub Actions. They use synthetic data
-generated per test, real rsync, and fake drives in temp folders. See
+generated per test, real rsync, and fake drives in temp folders. After every
+Baruch command a test runs, a check fails the test if data or a backup was lost
+without the output saying so. A fuzzer (`tests/fuzz/`) tries random sequences of
+user actions and failures; it's reproducible by default, and
+`BARUCH_FUZZ=explore uv run pytest tests/fuzz` explores further. See
 [`docs/spec.md`](docs/spec.md#testing) for details.
 
 To try a development version on the NAS:

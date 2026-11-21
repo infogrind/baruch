@@ -32,6 +32,7 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.170.17",
     "pytest>=9.2.0",
     "ruff>=0.17.5",
 ]

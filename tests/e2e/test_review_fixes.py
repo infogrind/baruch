@@ -208,6 +208,7 @@ def test_write_errors_on_the_drive_stop_the_run(env, monkeypatch):
 
 
 def test_a_file_deleted_between_plan_and_copy_counts_as_vanished(env, monkeypatch):
+    env.check_loss = False  # the test itself changes the NAS mid-command
     (a,) = setup(env)
     env.backup(a)
     env.nas.add(f"{TV}/Wire/S02E01.mkv", size=100)
