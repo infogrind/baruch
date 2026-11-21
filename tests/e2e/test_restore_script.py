@@ -40,6 +40,7 @@ def run_script(env, script, *args):
         ["sh", str(script), *args],
         capture_output=True,
         text=True,
+        errors="surrogateescape",  # names that aren't valid UTF-8
         env={**os.environ, "PATH": path},
         check=False,
     )
