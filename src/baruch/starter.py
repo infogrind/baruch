@@ -20,15 +20,15 @@ drives: {}
 #  BK-6A:  { reserve: 10% }
 
 # One rule per folder to back up. Its source must contain a .backup-source
-# marker file, and no source may lie inside another.
-#   pin:    everything in the source goes to one drive
-#   spread: each subfolder goes to exactly one drive, in order of preference
+# marker file, and no source may lie inside another. `drives` is a list in
+# order of preference: each subfolder (unit) goes to one of them, the first
+# with room. A list with one drive sends everything there.
 rules: []
 #  - name: movies
 #    source: /volume1/archive/movies
-#    pin: BK-20A
+#    drives: [BK-20A]
 #
 #  - name: tv
 #    source: /volume1/archive/tv
-#    spread: [BK-6A, BK-6B, BK-20A]
+#    drives: [BK-6A, BK-6B, BK-20A]
 """

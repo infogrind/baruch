@@ -1,7 +1,9 @@
-"""The registry: per unit where it should be (home) and where copies exist.
+"""The registry on the NAS: the intentions, not the facts.
 
-States are never stored; they're derived from `home`, `copies` and the last
-scan of the NAS (see `state()`).
+Per unit only its home (the drive it belongs on); per drive its disk ID and
+what Baruch last measured there; and the disk IDs of forgotten drives. What
+is actually on a drive is recorded on that drive (`records`) and cached on
+the NAS (`cache`). States are derived, never stored.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -19,9 +21,8 @@ import yaml
 from baruch import names
 from baruch.timefmt import from_text, to_text
 
+FORMAT = 2
 KEEP_VERSIONS = 10
-
-OK, ERRORS, SKIPPED, INCOMPLETE = "ok", "errors", "skipped", "incomplete"
 
 
 class RegistryError(Exception):
@@ -29,50 +30,25 @@ class RegistryError(Exception):
 
 
 @dataclass
-class Copy:
-    synced: datetime | None
-    result: str
-    size: int
-    unverified: bool = False
-
-    @property
-    def confirmed(self) -> bool:
-        return self.result == OK and not self.unverified
-
-
-@dataclass
-class Unit:
-    home: str | None
-    first_seen: date
-    copies: dict[str, Copy] = field(default_factory=dict)
-
-
-@dataclass
 class Drive:
-    disk_id: str | None
+    disk_id: str
     capacity: int = 0
     free: int = 0
     last_seen: datetime | None = None
     last_complete_run: datetime | None = None
     last_verify: datetime | None = None
     read_errors: int = 0  # at the last verify
-
-    @property
-    def forgotten(self) -> bool:
-        return self.disk_id is None
+    left_out: dict[str, str] = field(default_factory=dict)  # last run: unit -> why
 
 
 @dataclass
 class Registry:
-    units: dict[str, Unit] = field(default_factory=dict)
+    homes: dict[str, str] = field(default_factory=dict)  # unit -> drive
     drives: dict[str, Drive] = field(default_factory=dict)
+    forgotten: set[str] = field(default_factory=set)  # disk IDs
 
-    def active_drive(self, name: str) -> Drive | None:
-        d = self.drives.get(name)
-        return d if d and not d.forgotten else None
-
-    def units_of_rule(self, rule: str) -> dict[str, Unit]:
-        return {n: u for n, u in self.units.items() if rule_of(n) == rule}
+    def units_of_rule(self, rule: str) -> dict[str, str]:
+        return {n: h for n, h in self.homes.items() if rule_of(n) == rule}
 
 
 def rule_of(unit_name: str) -> str:
@@ -87,21 +63,6 @@ def folder_of(unit_name: str) -> str:
 
 
 def to_doc(reg: Registry) -> dict:
-    units = {}
-    for name in sorted(reg.units):
-        u = reg.units[name]
-        copies = {}
-        for drive in sorted(u.copies):
-            c = u.copies[drive]
-            entry = {"synced": to_text(c.synced), "result": c.result, "size": c.size}
-            if c.unverified:
-                entry["unverified"] = True
-            copies[drive] = entry
-        units[names.escape(name)] = {
-            "home": u.home,
-            "first_seen": u.first_seen.isoformat(),
-            "copies": copies,
-        }
     drives = {}
     for name in sorted(reg.drives):
         d = reg.drives[name]
@@ -113,39 +74,44 @@ def to_doc(reg: Registry) -> dict:
             "last_complete_run": to_text(d.last_complete_run),
             "last_verify": to_text(d.last_verify),
             "read_errors": d.read_errors,
+            "left_out": {names.escape(u): w for u, w in sorted(d.left_out.items())},
         }
-    return {"units": units, "drives": drives}
+    return {
+        "format": FORMAT,
+        "units": {names.escape(n): reg.homes[n] for n in sorted(reg.homes)},
+        "drives": drives,
+        "forgotten": sorted(reg.forgotten),
+    }
 
 
 def from_doc(doc: dict) -> Registry:
-    if not isinstance(doc, dict) or "units" not in doc or "drives" not in doc:
-        raise RegistryError("not a Baruch registry (needs units and drives)")
-    reg = Registry()
-    for key, raw in (doc["units"] or {}).items():
-        copies = {
-            str(drive): Copy(
-                from_text(c.get("synced")),
-                str(c["result"]),
-                int(c.get("size") or 0),
-                bool(c.get("unverified", False)),
+    if not isinstance(doc, dict):
+        raise RegistryError("not a Baruch registry")
+    if doc.get("format") != FORMAT:
+        if isinstance(doc.get("units"), dict) and "drives" in doc:
+            raise RegistryError(
+                "this registry is from Baruch v0.1.0, which this version doesn't "
+                "read; move it aside and run `baruch init`"
             )
-            for drive, c in (raw.get("copies") or {}).items()
-        }
-        first = raw.get("first_seen")
-        first_seen = (
-            first if isinstance(first, date) else date.fromisoformat(str(first))
-        )
-        reg.units[names.unescape(str(key))] = Unit(raw.get("home"), first_seen, copies)
-    for name, raw in (doc["drives"] or {}).items():
+        raise RegistryError("not a Baruch registry (no format 2)")
+    reg = Registry()
+    for key, home in (doc.get("units") or {}).items():
+        reg.homes[names.unescape(str(key))] = str(home)
+    for name, raw in (doc.get("drives") or {}).items():
         reg.drives[str(name)] = Drive(
-            raw.get("disk_id"),
+            str(raw["disk_id"]),
             int(raw.get("capacity") or 0),
             int(raw.get("free") or 0),
             from_text(raw.get("last_seen")),
             from_text(raw.get("last_complete_run")),
             from_text(raw.get("last_verify")),
             int(raw.get("read_errors") or 0),
+            {
+                names.unescape(str(u)): str(w)
+                for u, w in (raw.get("left_out") or {}).items()
+            },
         )
+    reg.forgotten = {str(x) for x in doc.get("forgotten") or []}
     return reg
 
 
@@ -177,11 +143,13 @@ def write_atomic(path: Path, text: str, parents: bool = True) -> None:
 
 
 class Store:
-    """The registry file in the state folder, with versions and a lock."""
+    """The state folder: the registry, the drives' cache, saved versions and
+    the lock."""
 
     def __init__(self, state_dir: Path, clock):
         self.state_dir = state_dir
         self.path = state_dir / "registry.yaml"
+        self.cache_dir = state_dir / "cache"
         self.versions = state_dir / "versions"
         self.clock = clock
         self._versioned = False
@@ -197,10 +165,15 @@ class Store:
             raise RegistryError(f"No registry at {self.path}.") from None
         return parse(text)
 
-    def save(self, reg: Registry) -> None:
+    def before_change(self) -> None:
+        """Keep a version of the registry and the cached records, once per
+        command, before the first change."""
         if not self._versioned and self.path.exists():
             self._keep_version()
         self._versioned = True
+
+    def save(self, reg: Registry) -> None:
+        self.before_change()
         write_atomic(self.path, dump(reg))
 
     def create(self, reg: Registry) -> None:
@@ -210,18 +183,30 @@ class Store:
     def _keep_version(self) -> None:
         self.versions.mkdir(parents=True, exist_ok=True)
         stamp = self.clock().strftime("%Y%m%dT%H%M%S")
-        target = self.versions / f"registry-{stamp}.yaml"
+        target = self.versions / stamp
         n = 1
         while target.exists():
             n += 1
-            target = self.versions / f"registry-{stamp}-{n}.yaml"
-        shutil.copy2(self.path, target)
+            target = self.versions / f"{stamp}-{n}"
+        target.mkdir()
+        shutil.copy2(self.path, target / "registry.yaml")
+        # The cached records too; the contents come back with the next scan.
+        from baruch import cache
+
+        if self.cache_dir.is_dir():
+            for f in sorted(self.cache_dir.glob("*.json")):
+                try:
+                    text = cache.records_only(self.cache_dir, f.stem)
+                except cache.CacheError:
+                    continue
+                if text is not None:
+                    write_atomic(target / "cache" / f.name, text)
         old = sorted(self.versions.iterdir(), key=lambda p: p.stat().st_mtime_ns)
         for p in old[:-KEEP_VERSIONS]:
-            p.unlink()
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
 
     def lock(self) -> bool:
-        """One Baruch command at a time. Held until the process ends."""
+        """One changing command at a time, held until the process ends."""
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self._lock_file = open(self.state_dir / "lock", "w")  # noqa: SIM115
         try:

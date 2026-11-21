@@ -98,8 +98,12 @@ def _lstat(item: os.DirEntry) -> os.stat_result:
     return item.stat(follow_symlinks=False)
 
 
-def scan_tree(root: Path, exclude: list[str]) -> TreeScan:
+def scan_tree(root: Path, exclude: list[str], inner: bool = True) -> TreeScan:
+    """A rule's folder as units. Excluded names are skipped at every depth; on
+    a drive (`inner=False`) only at the unit level, so excluded files inside a
+    unit are seen and deleted by its sync."""
     out = TreeScan()
+    inner_exclude = exclude if inner else []
     files_unit = UnitScan(FILES_UNIT)
     try:
         top = sorted(os.scandir(root), key=lambda e: e.name)
@@ -134,7 +138,7 @@ def scan_tree(root: Path, exclude: list[str]) -> TreeScan:
         elif entry.kind == DIR:
             unit = UnitScan(item.name)
             unit.entries[item.name] = entry
-            _walk(Path(item.path), item.name, exclude, unit, out)
+            _walk(Path(item.path), item.name, inner_exclude, unit, out)
             out.units[item.name] = unit
         else:
             files_unit.entries[item.name] = entry
@@ -169,9 +173,77 @@ def _walk(path: Path, rel: str, exclude: list[str], unit: UnitScan, out: TreeSca
             _walk(Path(item.path), child, exclude, unit, out)
 
 
-def scan_drive_root(root: Path) -> list[str]:
-    """Top-level names on a drive."""
+def scan_unit(
+    rule_root: Path, folder: str, exclude: list[str], inner: bool
+) -> UnitScan:
+    """One unit again, e.g. on the drive right after its sync."""
+    if folder == FILES_UNIT:
+        unit = UnitScan(FILES_UNIT)
+        try:
+            items = sorted(os.scandir(rule_root), key=lambda e: e.name)
+        except OSError as e:
+            unit.unreadable = e.strerror or str(e)
+            return unit
+        for item in items:
+            if excluded(item.name, exclude):
+                continue
+            try:
+                entry = _entry(_lstat(item), item.path)
+            except OSError as e:
+                unit.errors.append((item.name, e.strerror or str(e)))
+                continue
+            if entry is not None and entry.kind != DIR:
+                unit.entries[item.name] = entry
+        return unit
+    unit = UnitScan(folder)
+    path = rule_root / folder
     try:
-        return sorted(os.listdir(root))
-    except OSError:
-        return []
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return unit
+    except OSError as e:
+        unit.unreadable = e.strerror or str(e)
+        return unit
+    entry = _entry(st, str(path))
+    if entry is None or entry.kind != DIR:
+        return unit  # only a folder is a folder unit's data
+    unit.entries[folder] = entry
+    _walk(path, folder, exclude if inner else [], unit, TreeScan())
+    return unit
+
+
+RESERVED_ROOT = (".baruch", "lost+found")
+
+
+@dataclass
+class DriveScan:
+    """Everything on a drive: each top-level folder as units (a rule's folder,
+    or one no rule explains), and files directly at the root."""
+
+    folders: dict[str, TreeScan] = field(default_factory=dict)
+    loose: dict[str, Entry] = field(default_factory=dict)
+    errors: list[tuple[str, str]] = field(default_factory=list)
+
+
+def scan_drive(root: Path, exclude: list[str]) -> DriveScan:
+    out = DriveScan()
+    try:
+        top = sorted(os.scandir(root), key=lambda e: e.name)
+    except OSError as e:
+        out.errors.append((".", e.strerror or str(e)))
+        return out
+    for item in top:
+        if item.name in RESERVED_ROOT or excluded(item.name, exclude):
+            continue
+        try:
+            entry = _entry(_lstat(item), item.path)
+        except OSError as e:
+            out.errors.append((item.name, e.strerror or str(e)))
+            continue
+        if entry is None:
+            continue
+        if entry.kind == DIR:
+            out.folders[item.name] = scan_tree(Path(item.path), exclude, inner=False)
+        else:
+            out.loose[item.name] = entry
+    return out
