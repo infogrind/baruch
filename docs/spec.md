@@ -563,7 +563,12 @@ details live only in the configuration.
     in any other drive's cached contents. A file counts as existing elsewhere
     if a file with the same name, size and modification time is anywhere in
     the same rule there, so a renamed folder whose files are all in the new
-    one counts as 0. The summary above the
+    one counts as 0. Each unit line also says where Baruch believes the
+    files are besides this drive, as last seen: the NAS, and each drive with
+    when it was last seen ("also on BK-6B, last seen 2026-10-01", or "on no
+    other drive"). The count comes from the cache, so it's only as current as
+    each drive's last docking; naming the drives lets the user spot a copy on
+    a drive that has broken or changed since. The summary above the
     question totals them ("3 units: 214 files, 12 GiB exist on no other
     drive"); `prune` doesn't use the percentage warnings. Its deletions are
     listed as in requirement 24.

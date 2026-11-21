@@ -796,7 +796,18 @@ Each unit in the plan shows how many of its files exist nowhere else, neither
 on the NAS nor on another drive ("214 files only here"; a file with the same
 name, size and time anywhere in the same rule counts as existing, so a renamed
 folder that was copied again shows 0), and the summary above
-the question adds them up. Read that line before you answer.
+the question adds them up. Below it, the plan says where Baruch believes the
+other copies are, and when it last saw each of those drives:
+
+```text
+  - tv/Lost: gone on the NAS: 2 files, 20.0 KiB; 0 files only here
+      (also on BK-6B, last seen 2026-10-01)
+```
+
+Read those lines before you answer. Baruch only knows other drives as they were
+when last docked: if the drive named there has broken, been pruned or changed
+by hand since, the count is wrong. Answer `n`, and dock that drive (or
+`baruch drive forget` it if it's gone) first.
 
 `prune` never deletes unexplained data (folders of a rule that isn't in the
 config, folders that aren't units): it lists them with an `rm` command for you

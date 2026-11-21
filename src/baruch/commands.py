@@ -967,6 +967,7 @@ def cmd_prune(ctx: Context, args) -> int:
             f"  - {names.display(i.path)}: {i.reason}: {i.files} files, "
             f"{human(i.size)}; {i.only_files} files only here"
         )
+        lines.append(f"      ({_where_else(i)})")
     for i in hold:
         lines.append(f"  kept: {names.display(i.path)}: {i.reason}")
     if unexplained:
@@ -1029,6 +1030,19 @@ def cmd_prune(ctx: Context, args) -> int:
     _append(log, f"deleted {deleted} units")
     out(f"Deleted {deleted} units.")
     return 0
+
+
+def _where_else(i: stale.Item) -> str:
+    """Where Baruch believes the other copies are, and how old that is, so a
+    drive that's broken or changed since stands out."""
+    places = [
+        f"{d}, last seen {show_date(seen)}" for d, seen in sorted(i.elsewhere.items())
+    ]
+    if i.on_nas:
+        places.insert(0, "the NAS")
+    if not places:
+        return "on no other drive"
+    return "also on " + "; ".join(places)
 
 
 # verify

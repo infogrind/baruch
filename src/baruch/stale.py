@@ -14,7 +14,8 @@ records, and the other drives' caches in; a list of items out.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 
 from baruch.cache import DriveCache, unit_files
 from baruch.config import Config
@@ -40,6 +41,10 @@ class Item:
     only_files: int = 0  # files that exist neither on the NAS nor elsewhere
     only_bytes: int = 0
     in_progress: bool = False  # this drive's record says the sync didn't finish
+    # Where else Baruch believes this unit's files are, as last seen: the
+    # drives (with when each was last seen) and whether the NAS has them.
+    elsewhere: dict[str, datetime | None] = field(default_factory=dict)
+    on_nas: bool = False
 
 
 def unit_path(unit: str) -> str:
@@ -105,12 +110,15 @@ def classify(
         if scan is None or scan.root_error:
             continue  # marker missing or source unreadable: nothing is touched
 
-        # What exists elsewhere, for "files only here".
-        elsewhere: set = set()
-        _index(scan, elsewhere)
+        # What exists elsewhere, for "files only here" and for showing where.
+        nas_index: set = set()
+        _index(scan, nas_index)
+        drive_index: dict[str, set] = {}
         for other, c in caches.items():
             if other != drive:
-                _index(c.contents.folders.get(top), elsewhere)
+                drive_index[other] = set()
+                _index(c.contents.folders.get(top), drive_index[other])
+        elsewhere = nas_index.union(*drive_index.values())
 
         for folder, du in sorted(tree.units.items()):
             if not du.entries:
@@ -152,6 +160,12 @@ def classify(
             }
             item.only_files = len(only)
             item.only_bytes = sum(e.size for e in only.values())
+            keys = {(os.path.basename(r), e.size, e.mtime) for r, e in files.items()}
+            item.on_nas = bool(keys & nas_index)
+            for other, index in sorted(drive_index.items()):
+                if keys & index:
+                    entry = reg.drives.get(other)
+                    item.elsewhere[other] = entry.last_seen if entry else None
             items.append(item)
     return items
 

@@ -304,3 +304,27 @@ def test_prune_says_incomplete_when_the_homes_sync_didnt_finish(env, monkeypatch
 
     assert "kept: tv/Lost: home BK-6B is incomplete" in r.out
     assert a.exists("tv/Lost/S01E01.mkv")
+
+
+def test_prune_shows_where_else_the_files_are_and_when_that_drive_was_seen(env):
+    a, b = setup(env)
+    env.backup(a)
+    env.ok("move", "set", "tv/Lost", "--to", "BK-6B")
+    env.backup(b)
+    env.host.advance(days=20)
+
+    r = prune(env, a, answers="n")
+
+    assert "tv/Lost: home BK-6B has a newer complete copy" in r.out
+    assert "(also on the NAS; BK-6B, last seen 2026-11-14)" in r.out
+
+
+def test_prune_says_when_a_unit_is_on_no_other_drive(env):
+    a, _ = setup(env)
+    env.backup(a)
+    env.nas.delete(f"{TV}/Wire")
+    env.backup(a)
+
+    r = prune(env, a, answers="n")
+
+    assert "(on no other drive)" in r.out
