@@ -122,13 +122,14 @@ def classify(
             nu = scan.units.get(folder)
             on_nas = nu is not None and (folder != FILES_UNIT or bool(nu.entries))
             home = reg.homes.get(unit)
-            item = Item(unit_path(unit), "", "", du.size, len(files), unit=unit)
+            item = Item(unit, "", "", du.size, len(files), unit=unit)
             rec = records.get(unit)
             item.in_progress = rec is not None and rec.result == IN_PROGRESS
 
             if not on_nas:
                 if home is None:
                     item.action, item.unit = UNEXPLAINED, None
+                    item.path = unit_path(unit)
                     item.reason = "not a unit (not on the NAS)"
                 else:
                     item.action, item.kind, item.home = PRUNE, GONE, home

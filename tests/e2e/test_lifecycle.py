@@ -103,8 +103,9 @@ def test_forget_drops_copies_and_lists_units_without_backup(env):
 
     assert r.code == 0, r.out
     assert "tv/Lost" in r.out and "no backup" in r.out
-    assert env.unit("tv/Lost")["copies"] == {}
-    assert env.unit("tv/Lost")["home"] == "BK-6A"  # config still names it
+    assert not (env.state_dir / "cache" / "BK-6A.json").exists()
+    assert env.home("tv/Lost") == "BK-6A"  # config still names it
+    assert "copy pending" in env.ok("status").out
 
 
 def test_forget_asks_first(env):
@@ -114,7 +115,7 @@ def test_forget_asks_first(env):
 
     r = env.run("drive", "forget", "BK-6A", answers="n")
 
-    assert "BK-6A" in env.unit("tv/Lost")["copies"]
+    assert "BK-6A" in env.registry()["drives"]
     assert "nothing changed" in r.out.lower()
 
 
@@ -131,7 +132,7 @@ def test_forgotten_disk_is_an_unknown_disk_and_the_name_can_be_reused(env):
     new = env.register("BK-6A", disk="new-disk")
     r = env.backup(new)
     assert r.code == 0, r.out
-    assert "first copy" in r.out
+    assert "first sync" in r.out
     assert new.exists("tv/Lost/S01E01.mkv")
 
 
@@ -158,13 +159,17 @@ def test_upgrade_to_a_new_name_keeps_the_old_disk_until_the_new_one_has_copies(e
     )
 
     env.backup(new)
-    assert env.unit("tv/Lost")["home"] == "BK-12A"
+    assert env.home("tv/Lost") == "BK-12A"
     assert new.exists("tv/Lost/S01E01.mkv")
     assert old.exists("tv/Lost/S01E01.mkv")
 
-    r = env.backup(old)
+    r = env.backup(old)  # not in the config any more: a run touches nothing
     assert r.code == 0, r.out
-    assert "copy confirmed there on" in r.out
+    assert old.exists("tv/Lost/S01E01.mkv")
+    env.drives.dock(old)
+    r = env.run("prune", "BK-6A", answers="y")
+    env.drives.undock(old)
+    assert "home BK-12A has a newer complete copy" in r.out
     assert not old.exists("tv/Lost")
 
 
@@ -179,7 +184,7 @@ def test_drive_out_of_service_still_holding_copies_shows_in_status(env):
     assert "BK-6A" in r.out and "not in the configuration" in r.out
 
 
-def test_drive_out_of_service_is_dropped_once_it_holds_no_copies(env):
+def test_drive_out_of_service_is_dropped_by_forget(env):
     setup(env)
     old = env.register("BK-6A")
     env.backup(old)
@@ -187,3 +192,58 @@ def test_drive_out_of_service_is_dropped_once_it_holds_no_copies(env):
     env.ok("drive", "forget", "BK-6A", answers="y")
 
     assert "BK-6A" not in env.registry()["drives"]
+
+
+def _lose_state(env):
+    import shutil
+
+    shutil.rmtree(env.state_dir)
+    env.ok("init")
+
+
+def test_a_disk_is_taken_over_as_it_is_after_losing_the_state(env):
+    setup(env)
+    a = env.register("BK-6A")
+    env.backup(a)
+    _lose_state(env)
+    env.drives.dock(a)
+
+    r = env.run("drive", "register", "BK-6A", answers="y")
+
+    assert r.code == 0, r.out
+    assert "Take it over as BK-6A" in r.out and "keeping its label" in r.out
+    assert env.record(a, "tv/Lost").result == "ok"  # records kept
+    r = env.run("run", answers="y")
+    assert r.code == 0, r.out
+    assert env.home("tv/Lost") == "BK-6A"  # homes come back from the data
+    assert "first sync" not in r.out
+
+
+def test_a_forgotten_disk_is_never_taken_over(env):
+    setup(env)
+    a = env.register("BK-6A")
+    env.backup(a)
+    env.ok("drive", "forget", "BK-6A", answers="y")
+    env.drives.dock(a)
+
+    r = env.run("drive", "register", "BK-6A", answers="y")
+
+    assert r.code != 0
+    assert "--force" in r.out
+
+
+def test_register_force_starts_the_records_afresh(env):
+    setup(env)
+    a = env.register("BK-6A")
+    env.backup(a)
+    env.ok("drive", "forget", "BK-6A", answers="y")
+    env.drives.dock(a)
+
+    r = env.run("drive", "register", "BK-6A", "--force", answers="y")
+
+    assert r.code == 0, r.out
+    assert env.records(a) == {}
+    assert not a.exists(".baruch/restore.sh")
+    # Its data counts as unrecorded: synced again, listed file by file.
+    r = env.run("run", answers="y")
+    assert "existing folder, no record yet" in r.out

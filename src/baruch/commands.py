@@ -628,7 +628,7 @@ def cmd_status(ctx: Context, args) -> int:
         if conf:
             total_room += max(0, e.free - reserve)
         out("")
-        out(f"{name}{'' if conf else ' (not in the config)'}")
+        out(f"{name}{'' if conf else ' (not in the configuration)'}")
         out(
             f"  last complete run {show(e.last_complete_run)}, "
             f"last seen {show(e.last_seen)}"
@@ -824,8 +824,8 @@ def cmd_register(ctx: Context, args) -> int:
         )
     if name not in config.drives:
         out(
-            f"Warning: {name} isn't under drives in the config yet; it takes no "
-            "units until it is."
+            f"Warning: {name} is not in the configuration's drives yet; it takes "
+            "no units until it is."
         )
     label = d.label
     takeover = (
@@ -837,8 +837,9 @@ def cmd_register(ctx: Context, args) -> int:
     )
     if name in reg.drives:
         raise Fail(
-            f"{name} is registered to another disk (ID {reg.drives[name].disk_id}). A "
-            f"new disk gets a new name, or `baruch drive forget {name}` first."
+            f"{name} is already registered to another disk (ID "
+            f"{reg.drives[name].disk_id}). A new disk gets a new name, or "
+            f"`baruch drive forget {name}` first."
         )
     now = ctx.host.now()
     if takeover:
@@ -908,7 +909,7 @@ def cmd_forget(ctx: Context, args) -> int:
             if not any(c.complete(unit) for n, c in caches.items() if n != name):
                 losing.append(unit)
     if losing:
-        out(f"After this, {len(losing)} units have no complete copy on any drive:")
+        out(f"After this, {len(losing)} units have no backup (no complete copy):")
         for u in sorted(losing)[:50]:
             out(f"  {names.display(u)}")
         if len(losing) > 50:

@@ -202,14 +202,19 @@ def test_verify_offers_to_copy_unreadable_files_again(env):
     setup(env)
     a = env.register("BK-6A")
     env.backup(a)
+    before = env.record(a, "tv/Wire")
     os.chmod(a.path("tv/Wire/S01E01.mkv"), 0)
     env.drives.dock(a)
+    env.host.advance(days=1)
 
     r = env.run("verify", answers="y")
 
     assert r.code == 0, r.out
     assert "copy these 1 unreadable files again from the NAS" in r.out
     assert a.read("tv/Wire/S01E01.mkv") == env.nas.read(f"{TV}/Wire/S01E01.mkv")
+    # A re-copy isn't a sync: `synced` and the result stay as they were.
+    after = env.record(a, "tv/Wire")
+    assert (after.synced, after.result) == (before.synced, before.result)
 
 
 def test_init_writes_a_commented_starter_config(env):

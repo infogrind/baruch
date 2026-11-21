@@ -1,4 +1,4 @@
-"""Data already on a drive that the registry doesn't know: untracked copies."""
+"""Data already on a drive without records: the switch-over from an old backup."""
 
 import shutil
 
@@ -43,13 +43,13 @@ def test_untracked_copy_on_its_home_drive_is_listed_file_by_file(env):
     r = env.run("run", answers="y")
 
     assert r.code == 0, r.out
-    assert "existing folder, not yet recorded" in r.out
-    assert "- Alien/stale.mkv" in r.out
-    assert "+ Alien/new.mkv" in r.out
-    assert "first copy" not in r.out.split("movies/Heat")[1].split("\n")[0]
+    assert "existing folder, no record yet" in r.out
+    assert "- stale.mkv" in r.out
+    assert "+ new.mkv" in r.out
+    assert "first sync" not in r.out.split("movies/Heat")[1].split("\n")[0]
     assert not old.exists("movies/Alien/stale.mkv")
     assert old.exists("movies/Alien/new.mkv")
-    assert env.unit("movies/Alien")["copies"]["BK-20A"]["result"] == "ok"
+    assert env.record(old, "movies/Alien").result == "ok"
 
 
 def test_untracked_copy_counts_towards_the_warnings(env):
@@ -66,7 +66,7 @@ def test_untracked_copy_counts_towards_the_warnings(env):
     assert any(line.startswith("WARNING") for line in r.lines)
 
 
-def test_untracked_copy_elsewhere_is_orphaned_until_prune(env):
+def test_data_of_units_homed_elsewhere_is_stale_until_prune(env):
     setup(env)
     a = env.register("BK-6A", capacity=100_000)
     env.backup(a)  # tv shows now live on BK-6A
@@ -77,17 +77,17 @@ def test_untracked_copy_elsewhere_is_orphaned_until_prune(env):
 
     r = env.run("run", answers="y")
 
-    assert "orphaned" in r.out
-    assert "tv/Lost" in r.out and "BK-6A" in r.out
+    assert "Stale data on BK-20A" in r.out and "can be pruned" in r.out
     assert old.exists("tv/Lost/S01E01.mkv")
 
     r = env.run("prune", "BK-20A", answers="y")
     assert r.code == 0, r.out
+    assert "home BK-6A has a newer complete copy" in r.out
     assert not old.exists("tv/Lost")
     assert old.exists("movies/Alien/S01E01.mkv")
 
 
-def test_prune_keeps_an_untracked_copy_whose_home_has_no_confirmed_copy(env):
+def test_units_whose_data_is_already_there_get_that_drive_as_home(env):
     setup(env)
     env.register("BK-6A", capacity=100_000)
     old = env.drives.new("old-mirror", capacity=200_000)
@@ -96,11 +96,12 @@ def test_prune_keeps_an_untracked_copy_whose_home_has_no_confirmed_copy(env):
     env.ok("drive", "register", "BK-20A")
     env.ok("run", answers="y")
 
+    # BK-6A comes first in tv's list, but BK-20A already holds the shows.
+    assert env.home("tv/Lost") == "BK-20A"
     r = env.run("prune", "BK-20A", answers="y")
-
     assert r.code == 0, r.out
+    assert "Nothing to prune" in r.out
     assert old.exists("tv/Lost/S01E01.mkv")
-    assert "no confirmed copy" in r.out
 
 
 def test_prune_asks_and_n_changes_nothing(env):
@@ -110,6 +111,7 @@ def test_prune_asks_and_n_changes_nothing(env):
     old = env.drives.new("old-mirror", capacity=200_000)
     mirror(env, old)
     old.path("stray-folder").mkdir()
+    old.path("stray-folder/notes.txt").write_text("left over")
     env.drives.dock(old)
     env.ok("drive", "register", "BK-20A")
 
