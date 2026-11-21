@@ -171,10 +171,10 @@ def _release(
     if c is None:
         return HOLD, f"{home} has no cache: dock it first"
     rec = c.records.get(unit)
+    if rec is not None and rec.result == IN_PROGRESS:
+        return HOLD, f"home {home} is incomplete"
     if rec is None or not c.has_data(unit):
         return HOLD, f"home {home} has no copy yet"
-    if rec.result == IN_PROGRESS:
-        return HOLD, f"home {home} is incomplete"
     if rec.result == ERRORS:
         return HOLD, f"home {home} was synced with errors"
     assert rec.synced is not None

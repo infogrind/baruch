@@ -263,3 +263,44 @@ def test_rename_shows_zero_files_only_here_once_the_new_folder_is_backed_up(env)
     r = prune(env, a)
 
     assert "tv/Wire: gone on the NAS" in r.out and "0 files only here" in r.out
+
+
+# Found with the sandbox
+
+
+def test_a_newly_excluded_unit_names_the_drive_holding_its_data(env):
+    a, _ = setup(env)
+    env.backup(a)
+    env.config(rules=[spread("tv", TV, list(DRIVES))], drives=DRIVES, exclude=["Lost"])
+
+    r = env.backup(a)
+
+    assert "tv/Lost is now excluded" in r.out
+    assert "stays on BK-6A" in r.out
+
+
+def test_prune_says_incomplete_when_the_homes_sync_didnt_finish(env, monkeypatch):
+    a, b = setup(env)
+    env.backup(a)
+    env.ok("move", "set", "tv/Lost", "--to", "BK-6B")
+    import baruch.execute as execute
+
+    class Crash(BaseException):
+        pass
+
+    real = execute.run_rsync
+
+    def copy_then_crash(*args, **kwargs):
+        real(*args, **kwargs)
+        raise Crash
+
+    monkeypatch.setattr(execute, "run_rsync", copy_then_crash)
+    with pytest.raises(Crash):
+        env.backup(b)
+    monkeypatch.undo()
+    env.drives.undock_all()
+
+    r = prune(env, a)
+
+    assert "kept: tv/Lost: home BK-6B is incomplete" in r.out
+    assert a.exists("tv/Lost/S01E01.mkv")

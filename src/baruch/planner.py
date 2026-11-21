@@ -43,6 +43,7 @@ class UnitOp:
     delete_bytes: int = 0
     delete_files: int = 0
     files: int = 0  # files and links on the NAS
+    copy_files: int = 0  # files and links among `new` and `changed`
     warn_files: int = 0  # overwritten or deleted, Baruch's own state left out
     warn_bytes: int = 0
     unrecorded: bool = False  # data here, but no record: "existing folder"
@@ -183,6 +184,9 @@ def diff(
     if own:
         touched = set(op.changed) | set(op.delete) | set(op.new)
         op.own = sorted(r for r in touched if _under(r, [own]))
+    op.copy_files = sum(
+        1 for r in set(op.new) | set(op.changed) if nas_e[r].kind != DIR
+    )
     own_set = set(op.own)
     for rel in set(op.changed) | set(op.delete):
         d = disk_e[rel]
@@ -238,7 +242,7 @@ def make_plan(
         if d == drive:
             return has_data(disk_unit(unit))
         c = caches.get(d)
-        return bool(c and c.has_data(unit))
+        return bool(c and c.has_data(unit))  # as last seen
 
     def record_on(d: str, unit: str) -> Record | None:
         if d == drive:
@@ -261,7 +265,11 @@ def make_plan(
             continue  # marker missing or source unreadable: nothing changes
         folder = folder_of(unit)
         if folder != FILES_UNIT and excluded(folder, patterns):
-            where = [d for d in reg.drives if data_on(d, unit)]
+            where = [
+                d
+                for d in reg.drives
+                if data_on(d, unit) or (d in caches and caches[d].has_data(unit))
+            ]
             plan.dropped.append((unit, "its folder is now excluded"))
             plan.excluded_data[unit] = where
             del homes[unit]
@@ -432,7 +440,7 @@ def make_plan(
         contents=disk,
         records=records,
         nas=nas,
-        caches=caches,
+        caches={n: c for n, c in caches.items() if n != drive},
     )
 
     _warnings(plan, config, disk)
@@ -464,7 +472,9 @@ def _unit_op(plan, unit, nu, du, records, patterns, own_state, disk):
         for name in nu.entries:
             if has_data(tree.units.get(name)):
                 skip_new.add(name)
-                errors.append(f"{name}: name collides with a folder on the drive")
+                errors.append(
+                    f"{name}: name collides with a folder on the drive (prune it first)"
+                )
     rec = records.get(unit)
     kind = SYNC if has_data(du) else FIRST
     group = (

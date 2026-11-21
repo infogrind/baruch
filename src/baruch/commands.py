@@ -438,7 +438,7 @@ def cmd_run(ctx: Context, args) -> int:
     nas = scan_nas(config)
     skip = set(args.skip or [])
     _validate_skip(skip, reg, nas)
-    caches = {n: c for n, c in load_caches(store, reg, out).items() if n != d.name}
+    caches = load_caches(store, reg, out)  # the docked drive's: as last seen
     plan = planner.make_plan(
         config=config,
         reg=reg,

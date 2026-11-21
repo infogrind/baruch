@@ -195,7 +195,7 @@ def render_summary(plan: Plan, log) -> str:
         if not op.has_changes:
             continue
         out.append(
-            f"  {names.display(op.unit)}: copy {len(op.transfer)} "
+            f"  {names.display(op.unit)}: copy {op.copy_files} "
             f"({human(op.write_bytes)}), overwrite {len(op.changed)} "
             f"({human(op.overwrite_bytes)}), delete {op.delete_files} "
             f"({human(op.delete_bytes)})"
