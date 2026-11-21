@@ -89,7 +89,7 @@ def test_records_can_be_read_with_plain_sh(tmp_path):
     key = records.key(name)
     script = (
         'awk -v k="$1" \'index($0, k ": {") == 1 && /result: (ok|errors)}$/'
-        " {found=1} END {exit !found}' \"$2\""
+        ' {found=1} END {exit !found}\' "$2"'
     )
     ok = subprocess.run(
         ["sh", "-c", script, "sh", key, str(records.path(tmp_path))], check=False

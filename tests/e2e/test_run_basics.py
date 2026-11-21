@@ -1,5 +1,6 @@
 """A backup run: plan first, y/n, exactly the plan."""
 
+import json
 import os
 from pathlib import Path
 
@@ -25,7 +26,7 @@ def test_first_run_copies_every_unit_as_first_copy(env):
 
     assert r.code == 0, r.out
     assert "movies/Heat (1995)" in r.out
-    assert "first copy: 3 files" in r.out
+    assert "first sync: 3 files" in r.out
     assert "movies/(files)" in r.out
     assert r.lines[-1] == "safe to eject in DSM"
     for rel in ("Heat (1995)/S01E01.mkv", "Alien/S01E02.mkv", "readme.txt"):
@@ -38,13 +39,13 @@ def test_first_run_records_units_and_copies(env):
     drive = setup_movies(env)
     env.backup(drive)
 
-    unit = env.unit("movies/Heat (1995)")
-    assert unit["home"] == "BK-20A"
-    copy = unit["copies"]["BK-20A"]
-    assert copy["result"] == "ok"
-    assert copy["size"] == 3000
-    assert copy["synced"]
+    assert env.home("movies/Heat (1995)") == "BK-20A"
+    rec = env.record(drive, "movies/Heat (1995)")
+    assert rec.result == "ok" and rec.synced and rec.started
     assert "movies/(files)" in env.registry()["units"]
+    # The cache on the NAS has the same record.
+    cached = json.loads((env.state_dir / "cache" / "BK-20A.json").read_text())
+    assert cached["records"]["movies/Heat (1995)"][2] == "ok"
     assert env.registry()["drives"]["BK-20A"]["last_complete_run"]
 
 
@@ -53,11 +54,11 @@ def test_run_writes_snapshot_config_and_contents_to_the_drive(env):
     env.backup(drive)
 
     assert drive.exists(".baruch/label.yaml")
-    assert drive.exists(".baruch/registry.yaml")
+    assert drive.exists(".baruch/units.yaml")
     assert drive.exists(".baruch/config.yaml")
-    contents = drive.path(".baruch/contents.txt").read_text()
+    contents = drive.path(".baruch/contents").read_text()
     assert "movies/Heat (1995)/S01E01.mkv" in contents
-    assert (env.state_dir / "contents" / "BK-20A.txt").exists()
+    assert (env.state_dir / "cache" / "BK-20A.json").exists()
     assert list((env.state_dir / "logs").iterdir())
 
 
@@ -79,7 +80,7 @@ def test_dry_run_shows_the_plan_and_writes_nothing(env):
     r = env.backup(drive, "", "--dry-run")
 
     assert r.code == 0
-    assert "first copy: 3 files" in r.out
+    assert "first sync: 3 files" in r.out
     assert "[y/n]" not in r.out
     assert drive.files() == set()
     assert env.registry() == before
@@ -105,9 +106,9 @@ def test_second_run_lists_each_changed_file(env):
 
     r = env.backup(drive)
 
-    assert "~ Heat (1995)/S01E01.mkv" in r.out
-    assert "- Heat (1995)/S01E02.mkv" in r.out
-    assert "+ Heat (1995)/extras.mkv" in r.out
+    assert "~ S01E01.mkv" in r.out
+    assert "- S01E02.mkv" in r.out
+    assert "+ extras.mkv" in r.out
     assert "first copy" not in r.out
     assert "Alien" not in r.out  # unchanged units aren't listed file by file
     assert drive.read("movies/Heat (1995)/S01E01.mkv") == env.nas.read(
@@ -150,16 +151,16 @@ def test_summary_names_the_saved_plan_file(env):
 
     r = env.backup(drive, answers="n")
 
-    plan_line = next(line for line in r.lines if line.startswith("Plan saved to "))
-    path = plan_line.removeprefix("Plan saved to ").strip()
+    plan_line = next(line for line in r.lines if line.startswith("Plan file: "))
+    path = plan_line.removeprefix("Plan file: ").strip()
     assert os.path.exists(path)
-    assert "first copy: 3 files" in Path(path).read_text()
+    assert "first sync: 3 files" in Path(path).read_text()
 
 
 def test_skip_leaves_a_unit_out_and_it_stays_outdated(env):
     drive = setup_movies(env)
     env.backup(drive)
-    synced = env.unit("movies/Alien")["copies"]["BK-20A"]["synced"]
+    synced = env.record(drive, "movies/Alien").synced
     env.nas.replace("archive/movies/Alien/S01E01.mkv")
     env.nas.replace("archive/movies/Heat (1995)/S01E01.mkv")
 
@@ -172,9 +173,9 @@ def test_skip_leaves_a_unit_out_and_it_stays_outdated(env):
     assert drive.read("movies/Heat (1995)/S01E01.mkv") == env.nas.read(
         "archive/movies/Heat (1995)/S01E01.mkv"
     )
-    copy = env.unit("movies/Alien")["copies"]["BK-20A"]
-    assert copy["result"] == "skipped"
-    assert copy["synced"] == synced
+    # A skipped unit keeps its record unchanged, and the run isn't complete.
+    assert env.record(drive, "movies/Alien").synced == synced
+    assert "movies/Alien" in env.registry()["drives"]["BK-20A"]["left_out"]
 
 
 def test_excluded_names_are_not_copied_and_are_not_units(env):
@@ -219,8 +220,8 @@ def test_symlinks_hard_links_and_empty_folders(env):
     b = drive.path("movies/Alien/hardlink.mkv").stat()
     assert a.st_ino == b.st_ino
     assert drive.path("movies/Empty").is_dir()
-    assert env.unit("movies/Empty")["copies"]["BK-20A"]["size"] == 0
-    assert env.unit("movies/Alien")["copies"]["BK-20A"]["size"] == 2000
+    assert env.record(drive, "movies/Empty").result == "ok"
+    assert env.record(drive, "movies/Alien").result == "ok"
 
 
 def test_several_docked_drives_need_a_choice(env):
@@ -267,4 +268,59 @@ def test_each_real_run_writes_a_log_with_the_plan(env):
 
     logs = list((env.state_dir / "logs").iterdir())
     assert logs
-    assert any("first copy: 3 files" in log.read_text() for log in logs)
+    assert any("first sync: 3 files" in log.read_text() for log in logs)
+
+
+def _cache(env, drive_name="BK-20A"):
+    return json.loads((env.state_dir / "cache" / f"{drive_name}.json").read_text())
+
+
+def test_answer_n_refreshes_only_the_cache(env):
+    drive = setup_movies(env)
+    env.backup(drive)
+    registry = (env.state_dir / "registry.yaml").read_text()
+    drive.path("movies/Alien/by-hand.txt").write_text("x")  # changed by hand
+    env.nas.replace("archive/movies/Heat (1995)/S01E01.mkv")
+
+    env.backup(drive, answers="n")
+
+    assert "Alien/by-hand.txt" in _cache(env)["folders"]["movies"]["Alien"]
+    assert (env.state_dir / "registry.yaml").read_text() == registry
+    assert drive.exists("movies/Alien/by-hand.txt")
+
+
+def test_dry_run_doesnt_touch_the_cache(env):
+    drive = setup_movies(env)
+    env.backup(drive)
+    before = (env.state_dir / "cache" / "BK-20A.json").read_text()
+    drive.path("movies/Alien/by-hand.txt").write_text("x")
+
+    env.drives.dock(drive)
+    env.ok("run", "--dry-run")
+
+    assert (env.state_dir / "cache" / "BK-20A.json").read_text() == before
+
+
+def test_a_run_without_a_question_still_does_the_end_of_run_writes(env):
+    drive = setup_movies(env)
+    env.backup(drive)
+    drive.path(".baruch/restore.sh").unlink()
+
+    r = env.backup(drive)
+
+    assert "[y/n]" not in r.out
+    assert drive.exists(".baruch/restore.sh")
+    # Every unit's record was refreshed: `synced` means "last found current".
+    assert env.registry()["drives"]["BK-20A"]["last_complete_run"]
+
+
+def test_a_drive_without_records_is_refused_with_the_way_out(env):
+    drive = setup_movies(env)
+    env.backup(drive)
+    drive.path(".baruch/units.yaml").unlink()
+
+    r = env.backup(drive)
+
+    assert r.code != 0
+    assert "never takes a drive's records as empty" in r.out
+    assert "drive forget BK-20A" in r.out and "--force" in r.out

@@ -239,12 +239,18 @@ class Result:
         return self.out.rstrip("\n").splitlines()
 
 
+def rule(name: str, source: str, *drives: str) -> dict:
+    return {"name": name, "source": source, "drives": list(drives)}
+
+
 def pin(name: str, source: str, drive: str) -> dict:
-    return {"name": name, "source": source, "pin": drive}
+    """A rule with one drive: everything goes there."""
+    return rule(name, source, drive)
 
 
 def spread(name: str, source: str, drives: list[str]) -> dict:
-    return {"name": name, "source": source, "spread": drives}
+    """A rule with several drives, in order of preference."""
+    return rule(name, source, *drives)
 
 
 DEFAULT_SETTINGS = {
@@ -311,8 +317,17 @@ class Env:
     def registry(self) -> dict:
         return yaml.safe_load((self.state_dir / "registry.yaml").read_text())
 
-    def unit(self, name: str) -> dict:
-        return self.registry()["units"][name]
+    def home(self, name: str) -> str | None:
+        return self.registry()["units"].get(name)
+
+    def records(self, drive: FakeDrive) -> dict:
+        """The records on a drive (it needn't be docked)."""
+        from baruch import records
+
+        return records.parse((drive.root / ".baruch" / "units.yaml").read_text())
+
+    def record(self, drive: FakeDrive, unit: str):
+        return self.records(drive).get(unit)
 
     def register(
         self, name: str, disk: str | None = None, capacity: int = 100_000

@@ -47,6 +47,7 @@ class UnitOp:
     warn_bytes: int = 0
     unrecorded: bool = False  # data here, but no record: "existing folder"
     errors: list[str] = field(default_factory=list)  # the record gets `errors`
+    messages: list[str] = field(default_factory=list)  # from rsync, when done
     loss: float = 0.0  # share of its bytes here overwritten or deleted
     placed: bool = False  # got its home in this plan
 
@@ -303,6 +304,9 @@ def make_plan(
             plan.scan_errors.append((f"{rule.name}/{rel}", msg))
         for folder, nu in sorted(scan.units.items()):
             unit = f"{rule.name}/{folder}"
+            for rel, msg in nu.errors:
+                if rel != nu.name and not nu.unreadable:
+                    plan.scan_errors.append((f"{rule.name}/{rel}", msg))
             if nu.unreadable:
                 plan.unreadable.append((unit, nu.unreadable))
                 continue

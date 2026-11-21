@@ -1,4 +1,7 @@
-"""Interrupted runs, a full disk, unverified copies, bookkeeping."""
+"""Interrupted runs, a full disk, records on the drive and in the cache."""
+
+import contextlib
+import json
 
 from support import spread
 
@@ -34,6 +37,11 @@ def fail_on_call(monkeypatch, n, exc=None, result=None):
     monkeypatch.setattr(execute, "run_rsync", fake)
 
 
+def cached(env, drive_name):
+    doc = json.loads((env.state_dir / "cache" / f"{drive_name}.json").read_text())
+    return {unit: rec[2] for unit, rec in doc["records"].items()}
+
+
 def test_ctrl_c_records_finished_units_and_the_next_run_continues(env, monkeypatch):
     setup(env)
     a = env.register("BK-6A")
@@ -43,19 +51,39 @@ def test_ctrl_c_records_finished_units_and_the_next_run_continues(env, monkeypat
 
     assert r.code == 130
     assert "Interrupted" in r.out
-    assert r.lines[-1] == "safe to eject in DSM"  # snapshot and contents written
-    assert env.unit("tv/A")["copies"]["BK-6A"]["result"] == "ok"
-    assert env.unit("tv/B")["copies"]["BK-6A"]["result"] == "incomplete"
-    assert "BK-6A" not in env.unit("tv/C")["copies"]
-    assert a.exists(".baruch/registry.yaml")
+    assert r.lines[-1] == "safe to eject in DSM"  # end-of-run writes done
+    assert env.record(a, "tv/A").result == "ok"
+    # Recorded as interrupted on the drive itself, and in the cache.
+    assert env.record(a, "tv/B").result == "in-progress"
+    assert cached(env, "BK-6A")["tv/B"] == "in-progress"
+    assert env.record(a, "tv/C") is None
+    assert "BK-6A" not in str(env.registry()["drives"]["BK-6A"]["last_complete_run"])
 
     monkeypatch.undo()
     r = env.backup(a)
     assert r.code == 0, r.out
-    assert env.unit("tv/B")["copies"]["BK-6A"]["result"] == "ok"
+    assert env.record(a, "tv/B").result == "ok"
     assert a.read("tv/B/S01E01.mkv") == env.nas.read(f"{TV}/B/S01E01.mkv")
     first_unit = next(line for line in r.lines if line.startswith("tv/"))
     assert first_unit.startswith("tv/B")  # incomplete units go first
+
+
+def test_a_crash_leaves_the_unit_in_progress_on_the_drive_and_in_the_cache(
+    env, monkeypatch
+):
+    setup(env)
+    a = env.register("BK-6A")
+
+    class Crash(BaseException):  # nothing after it runs, like kill -9
+        pass
+
+    fail_on_call(monkeypatch, 2, exc=Crash())
+    with contextlib.suppress(Crash):
+        env.backup(a)
+
+    assert env.record(a, "tv/A").result == "ok"
+    assert env.record(a, "tv/B").result == "in-progress"
+    assert cached(env, "BK-6A")["tv/B"] == "in-progress"
 
 
 def test_full_disk_mid_unit_marks_it_incomplete_and_stops(env, monkeypatch):
@@ -67,61 +95,24 @@ def test_full_disk_mid_unit_marks_it_incomplete_and_stops(env, monkeypatch):
 
     assert r.code != 0
     assert "No space left" in r.out
-    assert env.unit("tv/B")["copies"]["BK-6A"]["result"] == "incomplete"
-    assert "BK-6A" not in env.unit("tv/C")["copies"]
+    assert env.record(a, "tv/B").result == "in-progress"
+    assert env.record(a, "tv/C") is None
+    left_out = env.registry()["drives"]["BK-6A"]["left_out"]
+    assert left_out["tv/B"] == "interrupted"
+    assert left_out["tv/C"].startswith("not reached")
 
 
-def test_unverified_copies_are_confirmed_when_their_drive_is_docked(env):
-    setup(env, {"A": 30_000, "Big": 80_000})
-    a = env.register("BK-6A")
-    b = env.register("BK-6B")
-    env.backup(a)
-    env.backup(b)
-    (env.state_dir / "registry.yaml").unlink()
-    env.drives.dock(b)
-    env.ok("registry", "restore", answers="y")
-    env.drives.undock(b)
-    # Largest first: Big went to BK-6A, A to BK-6B (whose snapshot this is).
-    assert env.unit("tv/Big")["copies"]["BK-6A"]["unverified"] is True
-
-    env.backup(a)
-
-    assert "unverified" not in env.unit("tv/Big")["copies"]["BK-6A"]
-
-
-def test_nothing_unverified_is_trusted_for_a_cleanup(env):
+def test_gone_unit_stays_until_prune_removes_its_data(env):
     setup(env, {"A": 30_000})
     a = env.register("BK-6A")
-    b = env.register("BK-6B")
     env.backup(a)
-    env.ok("move", "set", "tv/A", "--to", "BK-6B")
-    env.backup(b)
-    (env.state_dir / "registry.yaml").unlink()
-    env.drives.dock(a)
-    env.ok("registry", "restore", answers="y")  # BK-6B's copy is now unverified
-    env.drives.undock(a)
+    env.nas.delete(f"{TV}/A")
 
     r = env.backup(a)
 
-    assert a.exists("tv/A/S01E01.mkv")
-    assert "copy confirmed" not in r.out
-
-
-def test_gone_unit_stays_registered_until_every_copy_is_deleted(env):
-    setup(env, {"A": 30_000})
-    a = env.register("BK-6A")
-    b = env.register("BK-6B")
-    env.backup(a)
-    env.ok("move", "set", "tv/A", "--to", "BK-6B")
-    env.backup(b)
-    env.nas.delete(f"{TV}/A")
-
-    env.backup(b)
+    assert a.exists("tv/A/S01E01.mkv")  # a run never deletes a whole unit
+    assert "1 units of rule tv gone on the NAS" in r.out
     assert "tv/A" in env.registry()["units"]
-
-    env.backup(a)
-    assert "tv/A" not in env.registry()["units"]
-    assert not a.exists("tv/A")
 
 
 def test_a_run_with_nothing_to_do_still_records_the_drive(env):
@@ -148,6 +139,6 @@ def test_only_one_command_at_a_time(env):
     try:
         r = env.backup(a)
         assert r.code != 0
-        assert "Another Baruch command is running" in r.out
+        assert "Another Baruch command" in r.out
     finally:
         holder.unlock()
