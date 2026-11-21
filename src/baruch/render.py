@@ -67,8 +67,18 @@ def render_plan(plan: Plan, where: str) -> str:
         for op in plan.ops
         if not (op.has_changes or op.kind == FIRST or op.unrecorded or op.errors)
     )
-    if not plan.needs_answer:
+    problems = (
+        plan.skipped
+        or plan.drive_errors
+        or plan.scan_errors
+        or plan.unreadable
+        or plan.markers_missing
+        or plan.unplaced
+    )
+    if not plan.needs_answer and not problems:
         out.append("Nothing to do: everything on this drive is up to date.")
+    elif not plan.needs_answer:
+        out.append("No files change on this drive.")
     elif unchanged:
         out.append(f"{unchanged} units unchanged.")
     changes = plan.registry_changes()
@@ -90,7 +100,7 @@ def render_plan(plan: Plan, where: str) -> str:
         )
     for unit, msg in plan.unreadable:
         out.append(
-            f"{names.display(unit)}: unreadable on the NAS ({msg}), never taken as gone"
+            f"{names.display(unit)}: unreadable on the NAS ({msg}); left as it is"
         )
     for path, msg in plan.drive_errors:
         out.append(f"{names.display(path)} can't be read on the drive: {msg}")

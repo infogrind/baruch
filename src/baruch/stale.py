@@ -89,6 +89,8 @@ def classify(
         items.append(Item(name, UNEXPLAINED, "not in a rule's folder", entry.size, 1))
 
     for top, tree in sorted(contents.folders.items()):
+        if tree.root_error:
+            continue  # can't be read: nothing in it is touched
         if top not in rules:
             size = sum(u.size for u in tree.units.values())
             files = sum(len(unit_files(u)) for u in tree.units.values())

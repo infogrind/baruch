@@ -268,6 +268,8 @@ def make_plan(
             continue
         if folder not in scan.units and not _under(folder, [p for p, _ in scan.errors]):
             plan.gone.setdefault(rule.name, []).append(unit)
+            if unit in skip:
+                plan.skipped.append((unit, "skipped on request"))
             if not any(data_on(d, unit) for d in reg.drives):
                 plan.drop_gone.append(unit)
                 del homes[unit]
@@ -296,6 +298,14 @@ def make_plan(
         scan = nas.get(rule.name)
         if scan is None:
             plan.markers_missing.append(rule.name)
+            continue
+        tree = disk.folders.get(rule.name)
+        if tree is not None and tree.root_error:
+            # Nothing of this rule is touched while its folder can't be read.
+            plan.drive_errors.append((rule.name, tree.root_error))
+            for unit, home in homes.items():
+                if home == drive and rule_of(unit) == rule.name:
+                    plan.skipped.append((unit, "its rule's folder can't be read"))
             continue
         if scan.root_error:
             plan.scan_errors.append((rule.name, scan.root_error))
