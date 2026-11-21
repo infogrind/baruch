@@ -381,14 +381,17 @@ def cmd_init(ctx: Context, args) -> int:
         path.write_text(STARTER)
         out(f"Wrote a starter configuration to {path}: edit it, then run")
         out("`baruch config check`.")
+    else:
+        out(f"Kept the existing configuration at {path}.")
     return 0
 
 
 def cmd_config_check(ctx: Context, args) -> int:
     out = Out(ctx)
     config = get_config(ctx)
+    out(f"{len(config.rules)} rules:")
     for rule in config.rules:
-        out(describe(rule))
+        out(f"  {describe(rule)}")
     problems = check(config)
     if problems:
         out("Problems:\n" + _bullets(problems))
@@ -674,7 +677,7 @@ def cmd_status(ctx: Context, args) -> int:
     ]
     if nowhere:
         out("")
-        out(f"{len(nowhere)} units have no complete copy on any drive.")
+        out(f"{len(nowhere)} units have no backup (no complete copy on any drive).")
     for drive, items in sorted(_read_stale(ctx).items()):
         prune = [i for i in items if i["action"] == stale.PRUNE]
         hold = [i for i in items if i["action"] == stale.HOLD]
@@ -721,7 +724,7 @@ def cmd_find(ctx: Context, args) -> int:
                         (drive, role, c.records.get(unit), e.size)
                     )
     if not hits:
-        out(f"No file matching {pattern!r} on any drive.")
+        out(f"No file matching {pattern!r}: it's on no drive.")
         return 0
     for path in sorted(hits):
         size = hits[path][0][3]

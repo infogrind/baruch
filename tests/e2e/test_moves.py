@@ -1,173 +1,265 @@
-"""Moves and config changes: copy first, then delete."""
+"""Moves and prune: copy first, then delete; nothing unexplained is deleted."""
 
+import unicodedata
+
+import pytest
 from support import pin, spread
 
 TV = "archive/tv"
 
 
-def setup(env):
-    env.nas.add_show(TV, "Lost", episodes=2, size=20_000)
-    env.nas.add_show(TV, "Wire", episodes=2, size=10_000)
+DRIVES = {"BK-6A": "10%", "BK-6B": "10%"}
+
+
+def setup(env, shows=None, capacity=100_000):
+    for name, size in (shows or {"Lost": 20_000, "Wire": 10_000}).items():
+        env.nas.add_show(TV, name, episodes=2, size=size)
     env.nas.mark(TV)
-    env.config(
-        rules=[spread("tv", TV, ["BK-6A", "BK-6B"])],
-        drives={"BK-6A": "10%", "BK-6B": "10%"},
-    )
+    env.config(rules=[spread("tv", TV, list(DRIVES))], drives=DRIVES)
     env.ok("init")
     a = env.register("BK-6A", capacity=100_000)
-    b = env.register("BK-6B", capacity=100_000)
-    env.backup(a)
-    return a, b
+    return a, env.register("BK-6B", capacity=capacity)
 
 
-def test_move_copies_first_and_deletes_the_old_copy_later(env):
+def prune(env, drive, answers="y"):
+    env.drives.dock(drive)
+    try:
+        return env.run("prune", drive.root.name, answers=answers)
+    finally:
+        env.drives.undock(drive)
+
+
+# Copy first, then delete
+
+
+def test_move_copies_first_and_only_prune_deletes_the_old_copy(env):
     a, b = setup(env)
-
+    env.backup(a)
     env.ok("move", "set", "tv/Lost", "--to", "BK-6B")
-    assert env.unit("tv/Lost")["home"] == "BK-6B"
 
-    # Old drive docked before the new one has a copy: nothing is deleted.
-    r = env.backup(a)
+    r = env.backup(a)  # before BK-6B has it: nothing is deleted
     assert a.exists("tv/Lost/S01E01.mkv")
-    assert "moved to" not in r.out
+    assert "held: tv/Lost: home BK-6B has no copy yet" in r.out
+    r = prune(env, a)
+    assert "kept: tv/Lost: home BK-6B has no copy yet" in r.out
+    assert a.exists("tv/Lost/S01E01.mkv")
 
     r = env.backup(b)
-    assert "tv/Lost" in r.out and "first copy" in r.out
+    assert "tv/Lost: first sync" in r.out
+
+    r = prune(env, a)
+    assert "home BK-6B has a newer complete copy" in r.out
+    assert "0 files only here" in r.out
+    assert not a.exists("tv/Lost")
+    assert a.exists("tv/Wire/S01E01.mkv")
+    assert env.record(a, "tv/Lost") is None
+
+
+def test_moving_back_never_trusts_an_older_copy(env):
+    a, b = setup(env)
+    env.backup(a)
+    env.ok("move", "set", "tv/Lost", "--to", "BK-6B")
+    env.backup(b)
+    env.host.advance(days=1)
+    env.nas.replace(f"{TV}/Lost/S01E01.mkv")
+    env.ok("move", "set", "tv/Lost", "--to", "BK-6A")  # back, before BK-6A's run
+
+    r = prune(env, b)
+
+    assert "kept: tv/Lost: home BK-6A has an older copy" in r.out
     assert b.exists("tv/Lost/S01E01.mkv")
 
-    r = env.backup(a)
-    assert "moved to BK-6B, copy confirmed there on" in r.out
-    assert "WARNING" not in r.out
-    assert not a.exists("tv/Lost")
-    assert "BK-6A" not in env.unit("tv/Lost")["copies"]
 
-
-def test_move_set_refuses_pinned_units(env):
-    env.nas.add_show("archive/movies", "Alien", episodes=1, size=1000)
-    env.nas.mark("archive/movies")
-    env.config(
-        rules=[pin("movies", "archive/movies", "BK-20A")],
-        drives={"BK-20A": "5%", "BK-6A": "10%"},
-    )
-    env.ok("init")
-    drive = env.register("BK-20A")
-    env.register("BK-6A")
-    env.backup(drive)
-
-    r = env.run("move", "set", "movies/Alien", "--to", "BK-6A")
-
-    assert r.code != 0
-    assert "pin" in r.out
-    assert env.unit("movies/Alien")["home"] == "BK-20A"
-
-
-def test_move_set_refuses_drives_outside_the_spread_list(env):
-    setup(env)
-    env.register("BK-X")
-
-    r = env.run("move", "set", "tv/Lost", "--to", "BK-X")
-
-    assert r.code != 0
-    assert "spread list" in r.out
-
-
-def test_move_set_refuses_unregistered_drives(env):
-    env.nas.add_show(TV, "Lost", episodes=1, size=1000)
-    env.nas.mark(TV)
-    env.config(rules=[spread("tv", TV, ["BK-6A", "BK-6B"])], drives={"BK-6A": "10%"})
-    env.ok("init")
-    a = env.register("BK-6A")
+def test_prune_n_changes_nothing(env):
+    a, b = setup(env)
     env.backup(a)
+    env.ok("move", "set", "tv/Lost", "--to", "BK-6B")
+    env.backup(b)
 
-    r = env.run("move", "set", "tv/Lost", "--to", "BK-6B")
+    r = prune(env, a, answers="n")
 
-    assert r.code != 0
-    assert "not registered" in r.out
+    assert "Nothing changed" in r.out
+    assert a.exists("tv/Lost/S01E01.mkv")
+
+
+def test_prune_rewrites_the_restore_script(env):
+    a, b = setup(env)
+    env.backup(a)
+    env.ok("move", "set", "tv/Lost", "--to", "BK-6B")
+    env.backup(b)
+    before = a.path(".baruch/restore.sh").read_text()
+
+    prune(env, a)
+
+    after = a.path(".baruch/restore.sh").read_text()
+    assert "tv/Lost" in before and "'tv/Lost'" not in after
+
+
+def test_an_interrupted_prune_never_leaves_a_record_over_deleted_data(env, monkeypatch):
+    a, b = setup(env)
+    env.backup(a)
+    env.ok("move", "set", "tv/Lost", "--to", "BK-6B")
+    env.backup(b)
+    import baruch.commands as commands
+
+    def crash(*args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(commands, "remove_unit", crash)
+    with pytest.raises(KeyboardInterrupt):
+        prune(env, a)
+
+    assert env.record(a, "tv/Lost") is None  # removed before the data
+
+
+# move set
+
+
+def test_move_set_refuses_drives_outside_the_list_and_unregistered_ones(env):
+    a, _ = setup(env)
+    env.backup(a)
+    env.config(
+        rules=[spread("tv", TV, ["BK-6A", "BK-6B", "BK-6C"])],
+        drives={"BK-6A": "10%", "BK-6B": "10%", "BK-6C": "10%", "BK-Z": "10%"},
+    )
+    assert "isn't registered" in env.run("move", "set", "tv/Lost", "--to", "BK-6C").out
+    env.register("BK-Z")
+    assert "isn't in rule tv" in env.run("move", "set", "tv/Lost", "--to", "BK-Z").out
+
+
+def test_move_set_refuses_the_current_home_and_gone_units(env):
+    a, _ = setup(env)
+    env.backup(a)
+    assert "already BK-6A" in env.run("move", "set", "tv/Lost", "--to", "BK-6A").out
+    env.nas.delete(f"{TV}/Wire")
+    env.backup(a)
+    assert "gone on the NAS" in env.run("move", "set", "tv/Wire", "--to", "BK-6B").out
 
 
 def test_move_set_warns_if_the_unit_does_not_fit(env):
-    env.nas.add_show(TV, "Lost", episodes=2, size=20_000)
-    env.nas.mark(TV)
-    env.config(
-        rules=[spread("tv", TV, ["BK-6A", "BK-6B"])],
-        drives={"BK-6A": "10%", "BK-6B": "10%"},
-    )
-    env.ok("init")
-    a = env.register("BK-6A", capacity=100_000)
-    env.register("BK-6B", capacity=15_000)
+    a, _ = setup(env, {"Lost": 60_000, "Wire": 1000}, capacity=50_000)
     env.backup(a)
 
-    r = env.run("move", "set", "tv/Lost", "--to", "BK-6B")
+    r = env.ok("move", "set", "tv/Lost", "--to", "BK-6B")
 
-    assert r.code == 0, r.out
-    assert "doesn't fit" in r.out
-    assert env.unit("tv/Lost")["home"] == "BK-6B"
+    assert "may not fit on BK-6B" in r.out
+    assert env.home("tv/Lost") == "BK-6B"  # a warning, not a refusal
+
+
+def test_move_set_gives_an_unplaced_unit_a_home(env):
+    a, b = setup(env, {"Huge": 95_000})
+    env.backup(a)
+    assert env.home("tv/Huge") is None
+
+    env.ok("move", "set", "tv/Huge", "--to", "BK-6B")
+
+    assert env.home("tv/Huge") == "BK-6B"
 
 
 def test_unknown_unit_name_suggests_similar_ones(env):
-    setup(env)
+    nfd = unicodedata.normalize("NFD", "Café")
+    a, _ = setup(env, {nfd: 1000})
+    env.backup(a)
+    nfc = unicodedata.normalize("NFC", "tv/Café")
+    if nfc in env.registry()["units"]:
+        pytest.skip("this file system normalises names")
 
-    r = env.run("move", "set", "tv/lost", "--to", "BK-6B")
+    r = env.run("move", "set", nfc, "--to", "BK-6B", answers="\n")
 
-    assert r.code != 0
-    assert "tv/Lost" in r.out
+    assert "Similar" in r.out
 
 
-def test_pin_moved_to_another_drive_moves_the_units(env):
-    env.nas.add_show("archive/movies", "Alien", episodes=2, size=2000)
+# Config changes
+
+
+def test_drive_removed_from_the_list_places_its_units_again(env):
+    a, b = setup(env)
+    env.backup(a)
+    env.config(rules=[spread("tv", TV, ["BK-6B"])], drives=DRIVES)
+
+    r = env.backup(b)
+
+    assert "home BK-6A → BK-6B" in r.out
+    assert b.exists("tv/Lost/S01E01.mkv")
+    assert a.exists("tv/Lost/S01E01.mkv")  # stale until pruned
+
+
+def test_removed_rule_becomes_unexplained_data_never_deleted(env):
+    a, _ = setup(env)
+    env.backup(a)
+    env.nas.add_show("archive/movies", "Alien", episodes=1, size=100)
     env.nas.mark("archive/movies")
     env.config(
-        rules=[pin("movies", "archive/movies", "BK-20A")],
-        drives={"BK-20A": "5%", "BK-12A": "5%"},
-    )
-    env.ok("init")
-    old = env.register("BK-20A")
-    new = env.register("BK-12A")
-    env.backup(old)
-
-    env.config(
-        rules=[pin("movies", "archive/movies", "BK-12A")],
-        drives={"BK-20A": "5%", "BK-12A": "5%"},
-    )
-    r = env.backup(old)
-    assert old.exists("movies/Alien/S01E01.mkv")  # copy first
-
-    env.backup(new)
-    assert env.unit("movies/Alien")["home"] == "BK-12A"
-    assert new.exists("movies/Alien/S01E01.mkv")
-
-    r = env.backup(old)
-    assert "copy confirmed there on" in r.out
-    assert not old.exists("movies/Alien")
-
-
-def test_drive_removed_from_a_spread_list_places_its_units_again(env):
-    a, b = setup(env)
-    env.config(
-        rules=[spread("tv", TV, ["BK-6B"])],
+        rules=[pin("movies", "archive/movies", "BK-6A")],
         drives={"BK-6A": "10%", "BK-6B": "10%"},
     )
 
-    env.backup(b)
-
-    assert env.unit("tv/Lost")["home"] == "BK-6B"
-    assert b.exists("tv/Lost/S01E01.mkv")
-    assert a.exists("tv/Lost/S01E01.mkv")  # until it's docked again
-
     r = env.backup(a)
-    assert not a.exists("tv/Lost")
-    assert "copy confirmed there on" in r.out
+    assert "rule tv removed: 3 units dropped" in r.out
 
-
-def test_removed_rule_leaves_orphaned_data_that_only_prune_deletes(env):
-    a, _ = setup(env)
-    env.config(rules=[], drives={"BK-6A": "10%", "BK-6B": "10%"})
-
-    r = env.backup(a)
-    assert "orphaned" in r.out
+    r = prune(env, a)
+    assert "rule tv isn't in the config" in r.out
+    assert "rm -rf --" in r.out and "/tv" in r.out
     assert a.exists("tv/Lost/S01E01.mkv")
 
-    env.drives.dock(a)
-    r = env.run("prune", "BK-6A", answers="y")
-    assert r.code == 0, r.out
-    assert not a.exists("tv")
+
+def test_a_rule_added_back_finds_its_data_again(env):
+    a, _ = setup(env)
+    env.backup(a)
+    env.config(rules=[], drives=DRIVES)
+    env.backup(a)
+    env.config(rules=[spread("tv", TV, ["BK-6B", "BK-6A"])], drives=DRIVES)
+
+    r = env.backup(a)
+
+    # BK-6B comes first now, but BK-6A already holds the data.
+    assert env.home("tv/Lost") == "BK-6A"
+    assert "first sync" not in r.out
+
+
+# Gone units
+
+
+def test_gone_unit_is_pruned_and_its_entry_removed(env):
+    a, _ = setup(env)
+    env.backup(a)
+    env.nas.delete(f"{TV}/Wire")
+    env.backup(a)
+
+    r = prune(env, a)
+
+    assert "gone on the NAS" in r.out and "2 files only here" in r.out
+    assert "WARNING" in r.out and "exist on no other drive" in r.out
+    assert not a.exists("tv/Wire")
+    assert "tv/Wire" not in env.registry()["units"]
+
+
+def test_prune_keeps_a_gone_unit_that_came_back(env, monkeypatch):
+    a, _ = setup(env)
+    env.backup(a)
+    env.nas.delete(f"{TV}/Wire")
+    import baruch.commands as commands
+
+    real = commands.scan_nas
+
+    def scan_then_restore(config):
+        out = real(config)
+        env.nas.add_show(TV, "Wire", episodes=1, size=10)  # back after the plan
+        return out
+
+    monkeypatch.setattr(commands, "scan_nas", scan_then_restore)
+    r = prune(env, a)
+
+    assert "back on the NAS, kept" in r.out
+    assert a.exists("tv/Wire/S01E01.mkv")
+
+
+def test_rename_shows_zero_files_only_here_once_the_new_folder_is_backed_up(env):
+    a, _ = setup(env)
+    env.backup(a)
+    env.nas.rename(f"{TV}/Wire", f"{TV}/The Wire")
+    env.backup(a)
+
+    r = prune(env, a)
+
+    assert "tv/Wire: gone on the NAS" in r.out and "0 files only here" in r.out

@@ -28,7 +28,7 @@ def test_commands_refuse_without_a_registry_and_name_init(env):
     r = env.run("status")
 
     assert r.code != 0
-    assert "baruch init" in r.out and "registry restore" in r.out
+    assert "baruch init" in r.out and "saved version" in r.out
 
 
 def test_init_refuses_to_overwrite_an_existing_registry(env):
@@ -49,24 +49,6 @@ def test_a_version_is_kept_before_each_change(env):
     assert len(versions) >= 2
 
 
-def test_registry_restore_takes_the_docked_drives_snapshot(env):
-    setup(env)
-    a = env.register("BK-6A")
-    b = env.register("BK-6B")
-    env.backup(a)
-    env.nas.add_show(TV, "Big", episodes=1, size=85_000)
-    env.backup(b)  # Big doesn't fit on BK-6A, goes to BK-6B
-    (env.state_dir / "registry.yaml").unlink()
-    env.drives.dock(b)
-
-    r = env.run("registry", "restore", answers="y")
-
-    assert r.code == 0, r.out
-    assert env.unit("tv/Big")["home"] == "BK-6B"
-    lost = env.unit("tv/Lost")["copies"]["BK-6A"]
-    assert lost.get("unverified") is True
-
-
 # status
 
 
@@ -81,7 +63,7 @@ def test_status_lists_drives_and_units_that_need_attention(env):
 
     assert "BK-6A" in r.out and "BK-6B" in r.out
     assert "tv/Lost" in r.out and "copy pending" in r.out
-    assert "last scan" in r.out
+    assert "Last scan" in r.out
 
 
 def test_status_flags_drives_not_docked_for_too_long(env):
@@ -235,7 +217,7 @@ def test_init_writes_a_commented_starter_config(env):
 
     assert r.code == 0, r.out
     text = (env.config_dir / "config.yaml").read_text()
-    assert "# " in text and "spread:" in text and "pin:" in text
+    assert "# " in text and "drives: [BK-20A]" in text and "pin" not in text
     assert "config.yaml" in r.out
     r = env.run("config", "check")
     assert r.code == 0, r.out
@@ -250,4 +232,4 @@ def test_init_keeps_an_existing_config(env):
 
     assert r.code == 0, r.out
     assert (env.config_dir / "config.yaml").read_text() == before
-    assert "kept" in r.out
+    assert "kept" in r.out.lower()
