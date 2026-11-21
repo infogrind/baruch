@@ -6,10 +6,10 @@ time and backed up by hand.
 Baruch was Jeremiah's scribe, who wrote the burned scroll out again (Jeremiah
 36).
 
-> **Status:** design phase. This README describes the planned behaviour; the
-> full specification is [`docs/spec.md`](docs/spec.md), which wins if the two
-> disagree. The released v0.1.0 implements an earlier design (`pin` /
-> `spread`).
+> **Status:** v0.2.0, not released yet; it hasn't been used on the real NAS
+> yet. The full specification is [`docs/spec.md`](docs/spec.md), which wins if
+> the two disagree. The released v0.1.0 implements an earlier design (`pin` /
+> `spread`) and its registry isn't read by v0.2.0.
 
 ## What it does
 

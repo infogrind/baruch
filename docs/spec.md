@@ -710,8 +710,9 @@ that still holds its data, if any).
   is refused, naming the one that holds it. Read-only commands (`status`,
   `find`) don't take it and work during a run. The registry, the cache and
   the files on the drive are written atomically (temporary file, then
-  rename). A version of the registry and the cache is saved before each
-  command or run that changes them, and the last 10 are kept. `baruch init`
+  rename). A version of the registry and the cached records (not the
+  cached contents, which come back with the next scan of each drive) is saved
+  before each command or run that changes them, and the last 10 are kept. `baruch init`
   creates the registry, and a commented starter configuration if there's none
   yet; it refuses if a registry exists. If the registry is missing or can't be read, Baruch refuses to do
   anything and names the saved versions and `init`; it never starts with an
