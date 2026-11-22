@@ -17,13 +17,14 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
 from hypothesis import HealthCheck, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, precondition, rule
-from support import Env
+from support import Env, run_restore_script, walk
 from support import rule as rule_conf
 
 import baruch.execute as execute
@@ -74,6 +75,7 @@ class Baruch(RuleBasedStateMachine):
         self.fault: tuple[str, int] | None = None
         self.trace: list[str] = []  # BARUCH_FUZZ_TRACE=1 prints it
         self.state_lost = False  # at most once per sequence
+        self.restored = False  # at most once per sequence
         self.env.nas.mark(TV)
         self.env.nas.add_show(MOVIES, "Alien", episodes=2, size=4_000)
         self.env.nas.mark(MOVIES)
@@ -83,8 +85,19 @@ class Baruch(RuleBasedStateMachine):
             self.disks[name] = self.env.register(name, capacity=capacity)
 
     def teardown(self):
-        if os.environ.get("BARUCH_FUZZ_TRACE"):
-            print("\n--- sequence:\n  " + "\n  ".join(self.trace))
+        """Every sequence ends with a full backup, a disaster and a restore,
+        so restore.sh is checked against each history (also if a step
+        failed, this is skipped)."""
+        try:
+            if sys.exc_info()[0] is None:  # a failing step is the report
+                order = list(DRIVES)
+                self._disaster_and_restore(True, order, order[::-1])
+        finally:
+            if os.environ.get("BARUCH_FUZZ_TRACE"):
+                print("\n--- sequence:\n  " + "\n  ".join(self.trace))
+            self._clean_up()
+
+    def _clean_up(self):
         self.env.drives.undock_all()
         for p in self.tmp.rglob("*"):
             with contextlib.suppress(OSError):
@@ -339,6 +352,106 @@ class Baruch(RuleBasedStateMachine):
         self.env.ok("init")
         for drive in DRIVES:
             self._docked(drive, "drive", "register", drive, answers="y")
+
+    @precondition(lambda self: not self.restored)
+    @rule(order=st.permutations(list(DRIVES)), reorder=st.permutations(list(DRIVES)))
+    def disaster_and_restore(self, order, reorder):
+        """A disaster in the middle of a history; see _disaster_and_restore.
+        The sequence goes on from the restored NAS."""
+        self.restored = True
+        self._disaster_and_restore(False, order, reorder)
+
+    def _disaster_and_restore(self, fresh, order, reorder):
+        """The NAS loses both rules' folders; every drive's restore.sh copies
+        them back (`--run`, then `--run --stale`), as the README describes.
+
+        Always: every restored file is a file of some drive at the same
+        path, nothing outside the rule folders changes, no marker comes back.
+        `fresh`: right after a clean backup of every drive (twice, so units
+        placed during the first pass are copied too), each unit whose home
+        holds a copy equal to the NAS with record `ok` comes back complete."""
+        self.trace.append(f"disaster_and_restore fresh={fresh} {order} {reorder}")
+        self.fault = None
+        claimed: dict[str, dict[str, str]] = {}  # unit -> NAS files it must get
+        if fresh:
+            for rel in (TV, MOVIES):
+                if not self.env.nas.path(f"{rel}/.backup-source").exists():
+                    self.env.nas.mark(rel)
+            for drive in [*order, *order]:
+                self._docked(drive, "run", answers="y")
+            claimed = self._claimed()
+
+        nas = self.env.nas.root
+        sources = tuple(self.env.nas.path(rel) for rel in (TV, MOVIES))
+        outside = walk(nas, skip=sources)
+        for src in sources:
+            shutil.rmtree(src, ignore_errors=True)  # the share (archive) stays
+
+        outputs = []
+        for args, drives in ((("--run",), order), (("--run", "--stale"), reorder)):
+            for drive in drives:
+                disk = self.disks[drive]
+                slot = self.env.drives.dock(disk)
+                try:
+                    script = slot / ".baruch" / "restore.sh"
+                    if not script.exists():
+                        continue  # never got a run
+                    r = run_restore_script(self.env, script, *args)
+                finally:
+                    self.env.drives.undock(disk)
+                out = r.stdout + r.stderr
+                outputs.append(f"--- {drive} {' '.join(args)}\n{out}")
+                assert r.returncode == 0, out
+                assert "rsync error" not in out and "rsync:" not in out, out
+        self.trace.append("restore: " + "\n".join(outputs).replace("\n", "\n    "))
+
+        assert walk(nas, skip=sources) == outside, "restore wrote outside the rules"
+        for rule_name, src in zip(("tv", "movies"), sources, strict=True):
+            restored = walk(src)
+            assert ".backup-source" not in restored, "a marker was restored"
+            for rel, digest in restored.items():
+                on_drives = {
+                    walk(d.root / rule_name).get(rel) for d in self.disks.values()
+                }
+                assert digest in on_drives, f"{rule_name}/{rel} isn't on any drive"
+        for unit, files in claimed.items():
+            rule_name, folder = unit.split("/", 1)
+            src = sources[("tv", "movies").index(rule_name)]
+            got = walk(src / folder)
+            missing = {r: h for r, h in files.items() if got.get(r) != h}
+            assert not missing, (
+                f"{unit} was backed up but not restored: {sorted(missing)}\n"
+                + "\n".join(outputs)
+            )
+
+        for rel in (TV, MOVIES):  # as the scripts say, once all are restored
+            if self.env.nas.path(rel).is_dir():
+                self.env.nas.mark(rel)
+
+    def _claimed(self) -> dict[str, dict[str, str]]:
+        """Units Baruch claims are backed up: the home's record says ok and
+        its copy equals the NAS. Their files, relative to the unit."""
+        out = {}
+        for rule_name, rel in (("tv", TV), ("movies", MOVIES)):
+            src = self.env.nas.path(rel)
+            for folder in sorted(p.name for p in src.iterdir() if p.is_dir()):
+                unit = f"{rule_name}/{folder}"
+                home = self.env.home(unit)
+                if home not in self.disks:
+                    continue
+                disk = self.disks[home]
+                try:
+                    rec = self.env.record(disk, unit)
+                except OSError:
+                    continue
+                nas_files = walk(src / folder)
+                if (
+                    rec is not None
+                    and rec.result == "ok"
+                    and walk(disk.root / rule_name / folder) == nas_files
+                ):
+                    out[unit] = nas_files
+        return out
 
 
 TestBaruch = Baruch.TestCase

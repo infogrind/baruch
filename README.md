@@ -876,7 +876,8 @@ Tests run on the Mac and on Linux in GitHub Actions. They use synthetic data
 generated per test, real rsync, and fake drives in temp folders. After every
 Baruch command a test runs, a check fails the test if data or a backup was lost
 without the output saying so. A fuzzer (`tests/fuzz/`) tries random sequences of
-user actions and failures; it's reproducible by default, and
+user actions and failures, each ending with a restore by every drive's
+`restore.sh`; it's reproducible by default, and
 `BARUCH_FUZZ=explore uv run pytest tests/fuzz` explores further. See
 [`docs/spec.md`](docs/spec.md#testing) for details.
 

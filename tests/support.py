@@ -12,6 +12,7 @@ import io
 import os
 import re
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -489,6 +490,21 @@ class Env:
             return self.run("run", *extra, answers=answers)
         finally:
             self.drives.undock(drive)
+
+
+def run_restore_script(env: Env, script: Path, *args: str):
+    """The drive's restore.sh with plain `sh`, Homebrew's rsync first on the
+    PATH (as on the NAS)."""
+    rsync_dir = os.path.dirname(env.host.rsync())
+    path = rsync_dir + os.pathsep + os.environ.get("PATH", "")
+    return subprocess.run(
+        ["sh", str(script), *args],
+        capture_output=True,
+        text=True,
+        errors="surrogateescape",  # names that aren't valid UTF-8
+        env={**os.environ, "PATH": path},
+        check=False,
+    )
 
 
 needs_linux = pytest.mark.skipif(

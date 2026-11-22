@@ -96,7 +96,8 @@ proposing designs.
   file version or last backup lost unless the output named it. Opt out only
   for tests that change the NAS mid-command themselves (`env.check_loss`).
 - Fuzzing (`tests/fuzz/`, hypothesis): random sequences of user actions and
-  faults, derandomized by default; `BARUCH_FUZZ=explore` for more. Turn any
+  faults, each ending with a disaster and a restore with every drive's
+  `restore.sh`, derandomized by default; `BARUCH_FUZZ=explore` for more. Turn any
   failure it finds into an ordinary regression test as well.
 - Test data is built in test code (`env.nas.add_show`, `add`, `replace`,
   `delete`, `rename`, `mark`, `remove_marker`). Content is derived from path +

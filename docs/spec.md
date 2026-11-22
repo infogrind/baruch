@@ -1152,11 +1152,18 @@ the `PATH`.
 1. **Fuzzing** (`tests/fuzz/`): `hypothesis` generates sequences of what a
    user and bad luck can do (edit the NAS, back up, prune, move, change the
    config, crash or interrupt rsync, fill the disk, forget a drive, roll back
-   or lose Baruch's state) and shrinks any failure to the shortest sequence,
+   or lose Baruch's state, lose the NAS's data and restore it with every
+   drive's `restore.sh`) and shrinks any failure to the shortest sequence,
    printed as code. Derandomized by default, so every run and CI tries the
    same sequences; `BARUCH_FUZZ=explore` runs many more with random seeds,
    `--hypothesis-seed=N` a given one, and a printed `@reproduce_failure` line
-   replays one exactly.
+   replays one exactly. Every sequence ends with a backup of every drive, the
+   loss of both rules' folders and a restore with every drive's script
+   (`--run`, then `--run --stale`): each unit whose home holds an `ok` copy
+   equal to the NAS must come back complete, every restored file must be a
+   file of some drive, nothing outside the rule folders may change, and no
+   marker may come back. The same restore in the middle of a sequence checks
+   the last three.
 
 **The lost-data check.** Every Baruch command a test runs
 (`tests/support.py`, `Env.run`) is followed by a check that fails the test if

@@ -4,9 +4,9 @@ These run the real script with plain `sh` against the fake NAS."""
 
 import os
 import shutil
-import subprocess
 
 from support import needs_linux, pin, spread
+from support import run_restore_script as run_script
 
 TV = "archive/tv"
 MOVIES = "archive/movies"
@@ -31,19 +31,6 @@ def setup(env):
     drive = env.register("BK-20A", capacity=200_000)
     env.backup(drive)
     return drive
-
-
-def run_script(env, script, *args):
-    rsync_dir = os.path.dirname(env.host.rsync())
-    path = rsync_dir + os.pathsep + os.environ.get("PATH", "")
-    return subprocess.run(
-        ["sh", str(script), *args],
-        capture_output=True,
-        text=True,
-        errors="surrogateescape",  # names that aren't valid UTF-8
-        env={**os.environ, "PATH": path},
-        check=False,
-    )
 
 
 def test_each_run_writes_an_executable_restore_script(env):
