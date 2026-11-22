@@ -8,8 +8,7 @@ Baruch was Jeremiah's scribe, who wrote the burned scroll out again (Jeremiah
 
 > **Status:** v0.2.0, not released yet; it hasn't been used on the real NAS
 > yet. The full specification is [`docs/spec.md`](docs/spec.md), which wins if
-> the two disagree. The released v0.1.0 implements an earlier design (`pin` /
-> `spread`) and its registry isn't read by v0.2.0.
+> the two disagree.
 
 ## What it does
 
@@ -681,7 +680,7 @@ be told apart.
 | `reserve` | `drives` | Free space at which the drive takes no new units: a share (`10%`) or a size (`500G`) |
 | `name` | `rules` | Rule name, also its folder on each drive. Only `A–Z a–z 0–9 _ -`. |
 | `source` | `rules` | Source folder; must contain `.backup-source` |
-| `drives` | `rules` | Ordered list of drives, most preferred first; each unit goes to one of them. Not empty, no drive twice. v0.1.0's `pin`/`spread` are refused. |
+| `drives` | `rules` | Ordered list of drives, most preferred first; each unit goes to one of them. Not empty, no drive twice. |
 
 A registered drive that isn't listed under `drives` takes no units.
 

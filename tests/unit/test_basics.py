@@ -80,8 +80,7 @@ DRIVES = "drives:\n  X: {}\n  Y: {}\n"
 @pytest.mark.parametrize(
     "rules, problem",
     [
-        ("- { name: a, source: /v/a, pin: X }", "replaced by `drives"),
-        ("- { name: a, source: /v/a, spread: [X] }", "replaced by `drives"),
+        ("- { name: a, source: /v/a, drives: [X], pin: X }", "unknown key 'pin'"),
         ("- { name: a, source: /v/a }", "needs `drives`"),
         ("- { name: a, source: /v/a, drives: [] }", "needs `drives`"),
         ("- { name: a, source: /v/a, drives: [X, X] }", "listed twice"),
@@ -133,10 +132,9 @@ def test_registry_round_trip():
     assert parse(text) == reg
 
 
-def test_registry_of_v010_is_refused():
-    old = "units:\n  tv/X: {home: BK-6A, first_seen: 2026-11-01, copies: {}}\n"
-    with pytest.raises(RegistryError, match="v0.1.0"):
-        parse(old + "drives: {}\n")
+def test_registry_of_another_format_is_refused():
+    with pytest.raises(RegistryError, match="no format 2"):
+        parse("format: 1\nunits: {}\ndrives: {}\n")
 
 
 def fake_rsync(tmp_path, output):

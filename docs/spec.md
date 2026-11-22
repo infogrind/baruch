@@ -93,8 +93,7 @@ details live only in the configuration.
    ```
 
    Rule names must be unique. The list must not be empty or name a drive
-   twice, and every drive in it must be listed under the config's `drives`. The keys `pin` and `spread`
-   (v0.1.0) are refused, naming `drives`. Excludes are
+   twice, and every drive in it must be listed under the config's `drives`. Excludes are
    global only (in `settings`); there are no per-rule excludes.
 
 1. A rule's units are the direct subfolders of its source, for every rule
@@ -726,8 +725,8 @@ that still holds its data, if any).
   empty one by itself. Times are stored in UTC.
 
 - Changes are made with Baruch's commands. Hand edits are possible for
-  emergencies; every run validates the file. v0.1.0's registry format isn't
-  read.
+  emergencies; every run validates the file, and a registry of another format is
+  refused.
 
 - **Losing the NAS state.** The state is under `/volume1/homes/alex`, so the
   `home` rule backs it up (configuration and state are both in it, on the

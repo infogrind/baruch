@@ -88,12 +88,7 @@ def from_doc(doc: dict) -> Registry:
     if not isinstance(doc, dict):
         raise RegistryError("not a Baruch registry")
     if doc.get("format") != FORMAT:
-        if isinstance(doc.get("units"), dict) and "drives" in doc:
-            raise RegistryError(
-                "this registry is from Baruch v0.1.0, which this version doesn't "
-                "read; move it aside and run `baruch init`"
-            )
-        raise RegistryError("not a Baruch registry (no format 2)")
+        raise RegistryError(f"not a Baruch registry (no format {FORMAT})")
     reg = Registry()
     for key, home in (doc.get("units") or {}).items():
         reg.homes[names.unescape(str(key))] = str(home)

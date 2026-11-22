@@ -150,12 +150,6 @@ def _rules(raw: list, problems: list[str]) -> list[Rule]:
             continue
         if not Path(str(entry["source"])).is_absolute():
             problems.append(f"rule {name!r}: source must be an absolute path")
-        if "pin" in entry or "spread" in entry:
-            problems.append(
-                f"rule {name!r}: `pin` and `spread` (v0.1.0) are replaced by "
-                "`drives: [...]`, an ordered list"
-            )
-            continue
         listed = entry.get("drives")
         if not isinstance(listed, list) or not listed:
             problems.append(
