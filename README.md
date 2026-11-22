@@ -103,7 +103,9 @@ drives or rules yet, examples in the comments.
 ### 3. Write the configuration
 
 Edit `~/.config/baruch/config.yaml`: one entry per drive, and one rule per
-top-level folder you want backed up:
+top-level folder you want backed up (a second rule for the same folder makes a
+second copy on other drives, see
+[A second copy of a folder](#a-second-copy-of-a-folder)):
 
 ```yaml
 settings:
@@ -136,7 +138,9 @@ rules:
     drives: [BK-6A, BK-6B, BK-20A]   # order of preference
 ```
 
-Sources must not overlap: no source may lie inside another. Baruch only looks
+Sources must not overlap: no source may lie inside another. Two rules may
+have the same source, for a second copy on other drives (see
+[A second copy of a folder](#a-second-copy-of-a-folder)). Baruch only looks
 inside rule sources, so a folder without a rule isn't backed up.
 
 ### 4. Mark the sources and check the configuration
@@ -356,8 +360,9 @@ The **warnings** come last:
 
 Shares are measured against the drive's content before the run, and overwritten
 files count with their full size. Baruch's own state folder (`~/.local/state/baruch/`,
-part of your `home` rule) changes during every run, so its changes are one line
-in the plan and don't count towards the warnings.
+part of your `home` rule, and of any second rule for the same folder) changes
+during every run, so its changes are one line in the plan and don't count
+towards the warnings.
 
 `y` carries out exactly this plan. A planned file that changes before it's
 copied is copied as it is then. Files added or deleted on the NAS after the plan
@@ -434,6 +439,28 @@ home by hand.
 
 Add a rule to the configuration, put a `.backup-source` marker into its source,
 and run `baruch config check`. Its units get their homes on the next run.
+
+### A second copy of a folder
+
+To keep a folder on two drives, give it a second rule with the same source and
+a drive list that has no drive in common with the first:
+
+```yaml
+  - name: home
+    source: /volume1/homes/alex
+    drives: [BK-20A]
+
+  - name: home-1t
+    source: /volume1/homes/alex
+    drives: [BK-1T]
+```
+
+The two rules are independent: each has its own folder on its drives
+(`/home`, `/home-1t`), its own units and homes, and each copy is as current as
+its drive's last run. They share the source's marker. `config check` refuses
+two rules with the same source and a drive in common, since two copies on one
+disk protect against nothing. Keep the existing rule's name when you add the
+second one: a renamed rule is a new rule, copied again from scratch.
 
 ### Changing the configuration
 
@@ -590,6 +617,14 @@ that were only on a forgotten drive are reported as on no drive.
    are missing, which can include files deleted since; the script names each
    unit's home drive so you can check.
 
+   A folder backed up by two rules (see
+   [A second copy of a folder](#a-second-copy-of-a-folder)) is restored by
+   both drives' scripts, in either order. Per file, the newer one wins, and
+   files only the older copy holds come back too (which can include files
+   deleted since); the script you run second lists every file it skips. To
+   get exactly the newer copy, restore that folder only from its drive; the
+   other script without `--run` shows what it would add.
+
 1. Without that drive: every drive carries `/.baruch/` with its records (when
    each unit was synced) and a copy of the configuration.
 
@@ -632,7 +667,9 @@ each drive's last verify.
 If the registry is missing or unreadable, Baruch refuses to do anything. Copy
 back one of its saved versions (`~/.local/state/baruch/`); they're usually
 newer than any backup. Otherwise restore just Baruch's folders from the drive
-holding `home`, not the whole rule, and not with `--overwrite`, which would
+holding `home` (if a second rule backs up the same folder, e.g. `home-1t`,
+use whichever of the two drives ran last; there the paths start with
+`/home-1t/`), not the whole rule, and not with `--overwrite`, which would
 also overwrite your newer documents:
 
 ```sh
@@ -641,7 +678,7 @@ rsync -aH /volumeUSB1/usbshare/home/.config/baruch/ ~/.config/baruch/
 ```
 
 Either way you get an **older** state: as old as the saved version, or as the
-last run of the drive that holds `home`, which can be weeks. Your data on the
+last run of the drive you took it from, which can be weeks. Your data on the
 drives isn't affected, and each drive's own records replace the NAS's cache
 when it's next docked. But until then the cache may describe a disk you've
 replaced since, and `prune` would trust it. So:
@@ -741,7 +778,9 @@ are. It works while a run is in progress.
 
 Searches the cached contents lists and shows which drives hold matching files,
 when each drive's copy was synced, and whether it's the unit's home or stale
-data. Works while a run is in progress.
+data. The pattern is matched against paths on the drives, which start with
+the rule name (`home-1t/docs/a.txt`), so leave the rule name out to see both
+copies of a folder backed up by two rules. Works while a run is in progress.
 
 ### `baruch move set UNIT --to DRIVE`
 
@@ -826,7 +865,8 @@ Compares the docked drive's units with the NAS by checksum. See
 ### `baruch config check`
 
 Checks the configuration without a drive: sources exist and have markers, no
-source lies inside another, every drive named in a rule is listed under
+source lies inside another, rules with the same source have no drive in
+common, every drive named in a rule is listed under
 `drives`, no list is empty or names a drive twice, and no exclude matches
 `.backup-source`, `.baruch`, `lost+found` or a rule name.
 

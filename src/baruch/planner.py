@@ -220,12 +220,13 @@ def make_plan(
     records: dict[str, Record],
     caches: dict[str, DriveCache],
     skip: set[str] | None = None,
-    own_state: tuple[str, str] | None = None,
+    own_state: dict[str, str] | None = None,
     now: datetime | None = None,
 ) -> Plan:
     """`nas`: each rule's source as units (None: marker missing). `disk`: the
     docked drive, freshly scanned; `records`: its records. `caches`: the other
-    drives. `own_state`: Baruch's state folder as (rule, path in its folder)."""
+    drives. `own_state`: Baruch's state folder, per rule whose source holds
+    it (rule -> path in its folder)."""
     skip = skip or set()
     patterns = config.settings.exclude
     conf = config.drives.get(drive)
@@ -487,9 +488,7 @@ def _unit_op(plan, unit, nu, du, records, patterns, own_state, disk):
         else (G_EXISTING if kind == SYNC else G_FIRST)
     )
     op = UnitOp(unit, rule, kind, group, nu.size)
-    own = None
-    if own_state and own_state[0] == rule:
-        own = own_state[1]
+    own = (own_state or {}).get(rule)
     diff(nu, du, op, patterns, own, skip_new)
     op.files = nu.files
     op.unrecorded = kind == SYNC and rec is None

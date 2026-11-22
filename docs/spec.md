@@ -133,10 +133,16 @@ details live only in the configuration.
 
 1. Sources are absolute paths and never overlap: no rule's source is inside
    another's, also not through a symlink or `..`. Every run and `config check`
-   refuse a configuration where they do. Baruch only looks
-   inside rule sources: a folder that no rule covers (e.g. a new folder in
-   `/volume1/archive`) isn't backed up and isn't reported until a rule is added
-   for it.
+   refuse a configuration where they do. Two rules may have the same source,
+   for a second copy of it, if their `drives` lists have no drive in common
+   (two copies on one disk protect against nothing). They're independent like
+   any two rules: each has its own folder on the drives, its own units, homes
+   and records, and both are skipped together if the marker is missing. Each
+   rule scans the source itself, so a shared source is scanned once per rule
+   in every run.
+   Baruch only looks inside rule sources: a folder that no rule covers (e.g. a
+   new folder in `/volume1/archive`) isn't backed up and isn't reported until a
+   rule is added for it.
 
 ### Placement
 
@@ -254,9 +260,10 @@ details live only in the configuration.
       and files encrypted in place (same names, new content).
 
     Baruch's own state folder (`~/.local/state/baruch/`, inside the `home`
-    rule) changes during every run, so its changes don't count towards the
-    warnings; the plan shows them as one line, also among the deletions
-    ("Baruch's own state: 14 changed, 2 deleted"), with the full list in the
+    rule, and in every rule with the same source) changes during every run,
+    so its changes don't count towards the warnings; the plan shows them as
+    one line, also among the deletions ("Baruch's own state: 14 changed, 2
+    deleted"), with the full list in the
     plan file. Its copy on the drive is taken during the run, so it
     lacks that run's final writes ("Losing the NAS state").
 
@@ -409,7 +416,12 @@ details live only in the configuration.
     newer copy synced without errors), with or without a record, labelled with
     `prune`'s reason and the home drive: its data may be the newest or the only
     copy. Because the home copies are already back by then, `--update` lets an
-    older stale copy add only the files they lack. Units whose record
+    older stale copy add only the files they lack. The same holds for two
+    rules with the same source (requirement 10): both drives' scripts restore
+    it to the same folder, in either order. Per file, the newer modification
+    time wins; files only the older copy holds (which may include files
+    deleted since) come back too; the script run second lists every file it
+    skips. Units whose record
     here says `in-progress` are never restored automatically, stale or not. A `(files)` unit restores
     only the entries directly in `/<rule>/` that aren't folders, without the
     marker. If a rule's source folder doesn't exist on the NAS, the script
@@ -485,7 +497,10 @@ details live only in the configuration.
     cache and the last run's scan, and shows how old they are.
 01. `baruch find PATTERN` searches the cached contents lists and shows which
     drives hold matching files, each drive's `synced` time for the unit, and
-    whether the drive is its home or holds stale data. Forgotten drives aren't
+    whether the drive is its home or holds stale data. The pattern is matched
+    as text against paths on the drive, which start with the rule name, so a
+    source backed up by two rules shows both copies when the pattern leaves
+    out the rule name. Forgotten drives aren't
     searched: a file only they held is reported as on no drive.
 
 ### Drive lifecycle
@@ -738,8 +753,12 @@ that still holds its data, if any).
 
 - **Losing the NAS state.** The state is under `/volume1/homes/alex`, so the
   `home` rule backs it up (configuration and state are both in it, on the
-  same drive as long as `home` has a one-drive list). That copy is as old as
-  the last run of the drive holding `home`, which can be weeks. Everything
+  same drive as long as `home` has a one-drive list), and so does every rule
+  with the same source (requirement 10), each on its own drives. A copy is as
+  old as the last run of the drive holding it, which can be weeks; with two
+  such rules, the newer of the two counts. Restoring both drives' scripts
+  brings back the newer state's files plus files only the older copy holds
+  (e.g. old saved versions), which Baruch ignores. Everything
   done since is missing from it: homes assigned or moved, drives registered or
   forgotten, verify results. A saved version is the same. Data on the drives
   is never affected, and most of it comes back by itself, since a drive's own
@@ -979,7 +998,12 @@ shares. Baruch isn't needed for the restore: the drives hold plain files.
    the newest complete copy (its `units.yaml`, or `baruch find` once the state
    is back) before re-creating the markers. It also
    lists every file it skipped because the NAS copy is newer;
-   `--run --overwrite` copies those too.
+   `--run --overwrite` copies those too. A source backed up by two rules
+   (requirement 10) is restored by both drives' scripts, in either order: per
+   file the newer one wins, and files only the older copy holds come back too
+   (which may include files deleted since). To get exactly the newer copy,
+   restore it only from its drive; the other script without `--run` shows
+   what it would add.
 1. **Second pass:** once every drive's home units are back, run each script
    again with `--run --stale`. It restores the stale units `prune` would have
    held (their data may be the newest or the only copy, e.g. a unit moved
@@ -1240,10 +1264,6 @@ their data).
   sizes are offered as a rename (instant on the drive) instead of a recopy.
 - Rolling verify: each run also verifies a slice of the units not verified for
   the longest time.
-- Several copies of a source, each on different drives. If it's ever needed:
-  allow two rules with the same source and no drive in common, each
-  independent (own folder on the drives, own units and homes). There's no room
-  for it today: the backup is already about as large as the NAS.
 - Notifications (DSM or email) at the end of a run.
 - Encryption of the drives (not needed while they stay at home).
 

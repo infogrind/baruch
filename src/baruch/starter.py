@@ -20,9 +20,10 @@ drives: {}
 #  BK-6A:  { reserve: 10% }
 
 # One rule per folder to back up. Its source must contain a .backup-source
-# marker file, and no source may lie inside another. `drives` is a list in
-# order of preference: each subfolder (unit) goes to one of them, the first
-# with room. A list with one drive sends everything there.
+# marker file, and no source may lie inside another. A second rule with the
+# same source and other drives (none in common) makes a second copy.
+# `drives` is a list in order of preference: each subfolder (unit) goes to one
+# of them, the first with room. A list with one drive sends everything there.
 rules: []
 #  - name: movies
 #    source: /volume1/archive/movies

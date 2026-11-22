@@ -255,10 +255,12 @@ def script(
             continue
         lines.append(f"note {fmt(item.path)} {shlex.quote(item.reason)}\n")
     lines.append(FOOTER)
-    for rule in config.rules:
-        lines.append(
-            f"echo {shlex.quote('  touch ' + shlex.quote(str(rule.source / '.backup-source')))}\n"
-        )
+    markers: dict[str, str] = {}  # real path -> as configured
+    for rule in config.rules:  # once each, also for rules that share a source
+        marker = str(rule.source / ".backup-source")
+        markers.setdefault(os.path.realpath(marker), marker)
+    for marker in markers.values():
+        lines.append(f"echo {shlex.quote('  touch ' + shlex.quote(marker))}\n")
     lines.append('[ "$FAILED" -eq 0 ] || exit 1\n')
     return "".join(lines)
 
