@@ -119,5 +119,5 @@ def test_units_copy_pending_on_a_drive_not_docked_for_long_are_shown(env):
 
     r = env.backup(a)
 
-    assert "units copy pending on BK-6B" in r.out
+    assert "1 unit copy pending on BK-6B" in r.out
     assert "baruch move set" in r.out

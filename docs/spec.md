@@ -266,8 +266,10 @@ details live only in the configuration.
 01. **Confirm.** Before the question, the full plan is saved to the run's log
     file, and a short summary is shown right above the question: the totals
     per unit (copy / overwrite / delete: files and size), the path of the log
-    file, the number of units gone on the NAS, per rule ("400 units of rule tv
-    gone on the NAS: nothing is deleted, see the plan"), the
+    file, the number of units gone on the NAS whose data a drive still holds,
+    per rule ("400 units of rule tv gone on the NAS: nothing is deleted, see
+    the plan"; a gone unit without data anywhere is only a registry change),
+    the
     deletions and, last, the warnings. **Deletions** are listed in full,
     whatever their size, grouped by unit: every file or folder the plan
     deletes on the drive. A deleted file whose folder gets a new file in the

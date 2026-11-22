@@ -38,7 +38,7 @@ from baruch.render import render_plan, render_summary, reserve_lines, stale_line
 from baruch.restore import script as restore_script
 from baruch.rsync import DriveError, DriveGone, RsyncError, check_rsync, run_rsync
 from baruch.scan import FILE, DriveScan, TreeScan, scan_drive, scan_tree
-from baruch.sizes import human
+from baruch.sizes import count, human
 from baruch.starter import STARTER
 from baruch.timefmt import from_text, show, show_date, to_text
 
@@ -258,7 +258,10 @@ def _save_scan_state(ctx: Context, plan: planner.Plan, nas) -> None:
     doc = {
         "time": to_text(ctx.host.now()),
         "units": units,
-        "gone": [names.escape(u) for us in plan.gone.values() for u in us],
+        "gone": [
+            names.escape(u)
+            for u in [*(u for us in plan.gone.values() for u in us), *plan.drop_gone]
+        ],
         "unplaced": [[names.escape(u), s] for u, s in plan.unplaced],
         "markers_missing": plan.markers_missing,
     }
@@ -677,7 +680,10 @@ def cmd_status(ctx: Context, args) -> int:
     ]
     if nowhere:
         out("")
-        out(f"{len(nowhere)} units have no backup (no complete copy on any drive).")
+        out(
+            f"{count(len(nowhere), 'unit')} {'has' if len(nowhere) == 1 else 'have'} "
+            "no backup (no complete copy on any drive)."
+        )
     for drive, items in sorted(_read_stale(ctx).items()):
         prune = [i for i in items if i["action"] == stale.PRUNE]
         hold = [i for i in items if i["action"] == stale.HOLD]
@@ -909,7 +915,10 @@ def cmd_forget(ctx: Context, args) -> int:
             if not any(c.complete(unit) for n, c in caches.items() if n != name):
                 losing.append(unit)
     if losing:
-        out(f"After this, {len(losing)} units have no backup (no complete copy):")
+        out(
+            f"After this, {count(len(losing), 'unit')} "
+            f"{'has' if len(losing) == 1 else 'have'} no backup (no complete copy):"
+        )
         for u in sorted(losing)[:50]:
             out(f"  {names.display(u)}")
         if len(losing) > 50:
@@ -964,8 +973,8 @@ def cmd_prune(ctx: Context, args) -> int:
     lines = [f"Prune plan for {d.name} ({d.path.name})", ""]
     for i in prune:
         lines.append(
-            f"  - {names.display(i.path)}: {i.reason}: {i.files} files, "
-            f"{human(i.size)}; {i.only_files} files only here"
+            f"  - {names.display(i.path)}: {i.reason}: {count(i.files, 'file')}, "
+            f"{human(i.size)}; {count(i.only_files, 'file')} only here"
         )
         lines.append(f"      ({_where_else(i)})")
     for i in hold:
@@ -988,14 +997,15 @@ def cmd_prune(ctx: Context, args) -> int:
     only_bytes = sum(i.only_bytes for i in prune)
     out("")
     out(
-        f"Deletions on {d.name} ({len(prune)} units, "
+        f"Deletions on {d.name} ({count(len(prune), 'unit')}, "
         f"{human(sum(i.size for i in prune))}):"
     )
     for i in prune:
-        out(f"  {names.display(i.path)}: {i.files} files")
+        out(f"  {names.display(i.path)}: {count(i.files, 'file')}")
     if only_files:
         out(
-            f"WARNING: {len(prune)} units: {only_files} files, {human(only_bytes)} "
+            f"WARNING: {count(len(prune), 'unit')}: {count(only_files, 'file')}, "
+            f"{human(only_bytes)} "
             "exist on no other drive and not on the NAS"
         )
     if not out.ask("Delete them?"):
@@ -1027,8 +1037,8 @@ def cmd_prune(ctx: Context, args) -> int:
     state.records, state.cache.contents = recs_now, disk_now
     state.cache.records = dict(recs_now)
     end_writes(ctx, out, config, config_text, reg, store, state, nas, ctx.host.now())
-    _append(log, f"deleted {deleted} units")
-    out(f"Deleted {deleted} units.")
+    _append(log, f"deleted {count(deleted, 'unit')}")
+    out(f"Deleted {count(deleted, 'unit')}.")
     return 0
 
 
@@ -1110,14 +1120,17 @@ def cmd_verify(ctx: Context, args) -> int:
                 unclear.append((nas_file, drive_file))
     if changed:
         out(
-            f"{len(changed)} files changed on the NAS since the last sync (normal; "
+            f"{count(len(changed), 'file')} changed on the NAS since the last sync "
+            "(normal; "
             "the next run takes care of them):"
         )
         for rel in changed:
             out(f"  {names.display(rel)}")
     if unclear:
         out(
-            f"{len(unclear)} files differ with the same size and time; it's unknown "
+            f"{count(len(unclear), 'file')} "
+            f"{'differs' if len(unclear) == 1 else 'differ'} "
+            "with the same size and time; it's unknown "
             "which side is right. Decide each one:"
         )
         for nas_file, drive_file in unclear:
@@ -1128,7 +1141,7 @@ def cmd_verify(ctx: Context, args) -> int:
             out(f"    drive → NAS: rsync -a {drive_q} {nas_q}")
     n = sum(len(v) for v in read_errors.values())
     if read_errors:
-        out(f"{n} files can't be read on {d.name}:")
+        out(f"{count(n, 'file')} can't be read on {d.name}:")
         for unit, rels in sorted(read_errors.items()):
             for rel in rels:
                 out(f"  {names.display(rule_of(unit) + '/' + rel)}")

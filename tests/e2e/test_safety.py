@@ -37,7 +37,7 @@ def test_gone_unit_is_kept_by_runs_and_reported(env):
 
     r = env.backup(a)
 
-    assert "1 units of rule tv gone on the NAS" in r.out
+    assert "1 unit of rule tv gone on the NAS" in r.out
     assert "can be pruned" in r.out
     assert a.exists("tv/Wire/S01E01.mkv")  # only prune removes it
     assert "tv/Wire" in env.registry()["units"]
@@ -145,3 +145,26 @@ def test_renamed_show_is_a_gone_unit_plus_a_new_one(env):
     assert a.exists("tv/The Wire/S01E01.mkv")
     # The old folder stays until prune, so there's no moment without a copy.
     assert a.exists("tv/Wire/S01E01.mkv")
+
+
+def test_a_gone_unit_without_data_anywhere_is_only_a_registry_change(env):
+    """Placed on a drive that never got a copy, then deleted on the NAS: the
+    entry goes, and the gone count (about data kept on drives) leaves it out."""
+    env.nas.add_show(TV, "Lost", episodes=2, size=10_000)
+    env.nas.mark(TV)
+    drives = {"BK-6A": "10%", "BK-6B": "10%"}
+    env.config(rules=[spread("tv", TV, list(drives))], drives=drives)
+    env.ok("init")
+    a, b = env.register("BK-6A"), env.register("BK-6B")
+    env.backup(a)
+    env.nas.add_show(TV, "Pilot", episodes=1, size=1_000)
+    env.backup(b)  # Pilot's home becomes BK-6A, which isn't docked
+    assert env.home("tv/Pilot") == "BK-6A"
+    env.nas.delete(f"{TV}/Pilot")
+
+    r = env.backup(a, "n")
+
+    assert "tv/Pilot: gone on the NAS, no data on any drive: entry removed" in r.out
+    assert "gone on the NAS: nothing is deleted" not in r.out
+    env.backup(a)
+    assert "tv/Pilot" not in env.registry()["units"]

@@ -18,7 +18,7 @@ from baruch.config import Config, Rule
 from baruch.records import IN_PROGRESS, Record
 from baruch.registry import Registry, folder_of, rule_of
 from baruch.scan import DIR, FILES_UNIT, DriveScan, TreeScan, UnitScan, excluded
-from baruch.sizes import human
+from baruch.sizes import count, human
 
 FIRST = "first"  # no data on this drive yet: one summary line
 SYNC = "sync"  # data here: every new, changed and deleted file is listed
@@ -275,19 +275,21 @@ def make_plan(
             del homes[unit]
             continue
         if folder not in scan.units and not _under(folder, [p for p, _ in scan.errors]):
-            plan.gone.setdefault(rule.name, []).append(unit)
             if unit in skip:
                 plan.skipped.append((unit, "skipped on request"))
             if not any(data_on(d, unit) for d in reg.drives):
-                plan.drop_gone.append(unit)
+                plan.drop_gone.append(unit)  # nothing kept: not counted as gone
                 del homes[unit]
+                continue
+            plan.gone.setdefault(rule.name, []).append(unit)
             continue
         if home not in rule.drives:
             plan.rehomed[unit] = (home, None)
             homes[unit] = None  # placed again below
     for rule_name, n in sorted(removed.items()):
         plan.warnings.append(
-            f"WARNING: rule {rule_name} removed: {n} units dropped; their data "
+            f"WARNING: rule {rule_name} removed: {count(n, 'unit')} dropped; their "
+            "data "
             "becomes unexplained data"
         )
     for unit, where in sorted(plan.excluded_data.items()):

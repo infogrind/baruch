@@ -322,8 +322,8 @@ question.
 At the end, right above the question, comes a summary: the totals per unit
 (copy / overwrite / delete, in files and bytes), the path of the plan file,
 which is also the run's log (open it in a second tmux pane for long plans), how
-many units are gone on the NAS ("400 units of rule tv gone on the NAS:
-nothing is deleted"), every deletion, and the warnings. A sudden
+many units are gone on the NAS while a drive still holds their data ("400
+units of rule tv gone on the NAS: nothing is deleted"), every deletion, and the warnings. A sudden
 number of gone units, together with as many new units, usually means folders
 were renamed, or worse: answer `n` and look.
 

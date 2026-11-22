@@ -1,4 +1,4 @@
-"""Sizes, shares and durations, all binary (KiB, MiB, GiB, TiB)."""
+"""Sizes, shares and durations, all binary (KiB, MiB, GiB, TiB); counts."""
 
 from __future__ import annotations
 
@@ -58,3 +58,8 @@ def percent(part: float, whole: float) -> str:
     if whole <= 0:
         return "100%"
     return f"{100 * part / whole:.0f}%"
+
+
+def count(n: int, one: str, many: str | None = None) -> str:
+    """`1 unit`, `2 units`."""
+    return f"{n} {one if n == 1 else many or one + 's'}"

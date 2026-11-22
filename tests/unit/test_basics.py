@@ -11,7 +11,15 @@ from baruch.config import ConfigError, describe, load
 from baruch.records import OK
 from baruch.registry import Drive, Registry, RegistryError, dump, parse
 from baruch.rsync import RsyncError, check_rsync
-from baruch.sizes import human, parse_duration, parse_share, parse_size
+from baruch.sizes import count, human, parse_duration, parse_share, parse_size
+
+
+def test_counts_use_the_singular_for_one():
+    assert count(1, "unit") == "1 unit"
+    assert count(0, "unit") == "0 units"
+    assert count(400, "unit") == "400 units"
+    assert count(1, "entry", "entries") == "1 entry"
+    assert count(2, "entry", "entries") == "2 entries"
 
 
 def test_sizes_are_binary():

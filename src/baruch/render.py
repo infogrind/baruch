@@ -8,7 +8,7 @@ import posixpath
 from baruch import names, stale
 from baruch.planner import FIRST, Plan, UnitOp
 from baruch.scan import FILES_UNIT
-from baruch.sizes import human
+from baruch.sizes import count, human
 from baruch.timefmt import show_date
 
 MAX_DELETION_LINES = 50
@@ -29,7 +29,7 @@ def _inner(op: UnitOp, rel: str) -> str:
 def unit_lines(op: UnitOp) -> list[str]:
     name = names.display(op.unit)
     if op.kind == FIRST:
-        return [f"{name}: first sync: {op.files} files, {human(op.size)}"]
+        return [f"{name}: first sync: {count(op.files, 'file')}, {human(op.size)}"]
     head = name
     if op.unrecorded:
         head += ": existing folder, no record yet"
@@ -51,7 +51,7 @@ def unit_lines(op: UnitOp) -> list[str]:
     if excl:
         lines.append(f"  - {len(excl)} excluded names (now matched by an exclude)")
     if own:
-        lines.append(f"  ~ Baruch's own state: {len(own)} files")
+        lines.append(f"  ~ Baruch's own state: {count(len(own), 'file')}")
     for e in op.errors:
         lines.append(f"  ! {names.display(e)}")
     return lines
@@ -80,7 +80,7 @@ def render_plan(plan: Plan, where: str) -> str:
     elif not plan.needs_answer:
         out.append("No files change on this drive.")
     elif unchanged:
-        out.append(f"{unchanged} units unchanged.")
+        out.append(f"{count(unchanged, 'unit')} unchanged.")
     changes = plan.registry_changes()
     if changes:
         out.append("Registry changes:")
@@ -106,7 +106,8 @@ def render_plan(plan: Plan, where: str) -> str:
         out.append(f"{names.display(path)} can't be read on the drive: {msg}")
     for drive, n, seen in plan.pending_elsewhere:
         out.append(
-            f"{n} units copy pending on {drive}, last docked {show_date(seen)}: "
+            f"{count(n, 'unit')} copy pending on {drive}, last docked "
+            f"{show_date(seen)}: "
             "`baruch move set UNIT --to DRIVE` gives them a drive that is docked"
         )
     if not plan.needs_answer:
@@ -117,7 +118,8 @@ def render_plan(plan: Plan, where: str) -> str:
 
 def _gone_lines(plan: Plan) -> list[str]:
     return [
-        f"{len(units)} units of rule {rule} gone on the NAS: nothing is deleted, "
+        f"{count(len(units), 'unit')} of rule {rule} gone on the NAS: nothing is "
+        "deleted, "
         "see the plan"
         for rule, units in sorted(plan.gone.items())
     ]
@@ -132,7 +134,8 @@ def stale_lines(items: list[stale.Item], drive: str) -> list[str]:
     if prune or hold:
         size = sum(i.size for i in prune)
         out.append(
-            f"Stale data on {drive}: {len(prune)} units, {human(size)} can be pruned "
+            f"Stale data on {drive}: {count(len(prune), 'unit')}, {human(size)} can be "
+            "pruned "
             f"(`baruch prune {drive}`); {len(hold)} held"
         )
         for i in hold:
@@ -176,7 +179,10 @@ def deletion_lines(plan: Plan) -> list[str]:
         units.append(lines)
     if not units:
         return []
-    out = [f"Deletions on {plan.drive} ({total} entries, {len(units)} units):"]
+    out = [
+        f"Deletions on {plan.drive} ({count(total, 'entry', 'entries')}, "
+        f"{count(len(units), 'unit')}):"
+    ]
     shown = 0
     for lines in units:
         for line in lines:

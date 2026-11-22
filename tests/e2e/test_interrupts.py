@@ -111,7 +111,7 @@ def test_gone_unit_stays_until_prune_removes_its_data(env):
     r = env.backup(a)
 
     assert a.exists("tv/A/S01E01.mkv")  # a run never deletes a whole unit
-    assert "1 units of rule tv gone on the NAS" in r.out
+    assert "1 unit of rule tv gone on the NAS" in r.out
     assert "tv/A" in env.registry()["units"]
 
 
