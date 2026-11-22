@@ -92,8 +92,12 @@ if [ ! -r "$RECORDS" ]; then
 fi
 SKIPPED=0
 LISTED=0
+FAILED=0
+count() {  # n thing [things]
+    if [ "$1" -eq 1 ]; then echo "$1 $2"; else echo "$1 ${3:-${2}s}"; fi
+}
 
-complete() {  # the record says the unit's sync finished
+finished() {  # the record says the unit's sync finished
     [ -n "$RECORDS_OK" ] || return 1
     K=$1 awk 'index($0, ENVIRON["K"] ": {") == 1 && /result: (ok|errors)\}$/ {f=1} END {exit !f}' "$RECORDS"
 }
@@ -113,7 +117,7 @@ target_ok() {  # the rule's source folder exists, or can be made one level deep
         return 1
     fi
     if [ -n "$DRY" ]; then return 0; fi
-    mkdir "$1"
+    mkdir "$1" || { echo "!! $1 can't be created: skipped"; return 1; }
 }
 copy() {  # source on the drive, target on the NAS, [files-unit]
     if [ -n "${3:-}" ]; then
@@ -128,6 +132,7 @@ copy() {  # source on the drive, target on the NAS, [files-unit]
     else
         "$RSYNC" -aH $UPDATE --info=skip1 "$@" "$src" "$dst" >"$out" 2>&1
     fi
+    status=$?
     grep -v ' is newer$' "$out" || true
     n=$(grep -c ' is newer$' "$out" || true)
     if [ "$n" -gt 0 ]; then
@@ -136,6 +141,10 @@ copy() {  # source on the drive, target on the NAS, [files-unit]
         SKIPPED=$((SKIPPED + n))
     fi
     rm -f "$out"
+    if [ "$status" -ne 0 ]; then
+        echo "!! $name: rsync failed (exit $status)"
+        FAILED=$((FAILED + 1))
+    fi
 }
 by_hand() {  # source, target, files-unit
     if [ -n "${3:-}" ]; then
@@ -145,7 +154,7 @@ by_hand() {  # source, target, files-unit
     fi
 }
 unit() {  # kind key name rule folder source [reason]
-    kind=$1; key=$2; name=$(printf '%b' "$3"); rule=$(printf '%b' "$4")
+    kind=$1; key=$(printf '%b' "$2"); name=$(printf '%b' "$3"); rule=$(printf '%b' "$4")
     folder=$(printf '%b' "$5"); source=$(printf '%b' "$6"); reason=${7:-}
     if [ "$folder" = "(files)" ]; then
         src="$DRIVE/$rule/"; dst="$source/"; files=yes
@@ -158,7 +167,7 @@ unit() {  # kind key name rule folder source [reason]
         LISTED=$((LISTED + 1)); return 0
     fi
     if [ "$kind" = home ] && [ -n "$STALE" ]; then return 0; fi
-    if ! complete "$key"; then
+    if ! finished "$key"; then
         if recorded "$key"; then
             echo "-- $name: not restored: its last sync didn't finish; an older"
             echo "   complete copy may be on another drive"
@@ -169,7 +178,7 @@ unit() {  # kind key name rule folder source [reason]
         by_hand "$src" "$dst" "$files"
         LISTED=$((LISTED + 1)); return 0
     fi
-    target_ok "$source" || return 0
+    if ! target_ok "$source"; then FAILED=$((FAILED + 1)); return 0; fi
     echo "== $name (synced $(synced "$key")) -> $dst ${reason:+($reason)}"
     copy "$src" "$dst" "$files"
 }
@@ -190,8 +199,12 @@ if [ -n "$NEWER" ]; then
     echo "$NEWER" | sed 's/^/     /'
 fi
 echo
-[ "$SKIPPED" -eq 0 ] || echo "$SKIPPED files kept on the NAS because they're newer (listed above)."
-[ "$LISTED" -eq 0 ] || echo "$LISTED items listed, not restored (see above)."
+[ "$SKIPPED" -eq 0 ] || echo "$(count "$SKIPPED" file) kept on the NAS because they're newer (listed above)."
+[ "$LISTED" -eq 0 ] || echo "$(count "$LISTED" item) listed, not restored (see above)."
+if [ "$FAILED" -gt 0 ]; then
+    echo "!! $(count "$FAILED" unit) not restored because of an error (marked !! above):"
+    echo "!! fix the cause and run this script again."
+fi
 if [ -n "$DRY" ]; then echo "Dry run finished: nothing was copied."; fi
 echo "Once every drive is restored, re-create the markers:"
 """
@@ -246,13 +259,14 @@ def script(
         lines.append(
             f"echo {shlex.quote('  touch ' + shlex.quote(str(rule.source / '.backup-source')))}\n"
         )
+    lines.append('[ "$FAILED" -eq 0 ] || exit 1\n')
     return "".join(lines)
 
 
 def _unit_line(kind: str, unit: str, rule: Rule, reason: str) -> str:
     folder = unit.split("/", 1)[1]
     return (
-        f"unit {kind} {shlex.quote(records.key(unit))} {fmt(unit)} "
+        f"unit {kind} {fmt(records.key(unit))} {fmt(unit)} "
         f"{fmt(rule.name)} {fmt(folder)} {fmt(str(rule.source))} "
         f"{shlex.quote(reason)}\n"
     )

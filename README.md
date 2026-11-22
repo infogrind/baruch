@@ -568,7 +568,10 @@ that were only on a forgotten drive are reported as on no drive.
    the NAS has different paths now, edit the targets in the script first. It
    uses Homebrew's rsync if it's installed. A missing rule folder (e.g.
    `/volume1/archive/tv`) is created if its share exists; otherwise the rule is
-   skipped and reported.
+   skipped and reported. A unit that can't be restored (rsync fails, or its
+   rule is skipped) is marked `!!` and counted at the end, and the script exits
+   with status 1: fix the cause and run it again. Status 0 means everything it
+   set out to copy was copied.
 
    For every unit a script lists as incomplete, restore it by hand from the
    drive with the newest complete copy (its `/.baruch/units.yaml`, or

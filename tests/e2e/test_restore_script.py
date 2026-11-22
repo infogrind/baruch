@@ -4,11 +4,21 @@ These run the real script with plain `sh` against the fake NAS."""
 
 import os
 import shutil
+import subprocess
+import sys
+from pathlib import Path
 
-from support import needs_linux, pin, spread
+from support import needs_linux, not_root, pin, spread
 from support import run_restore_script as run_script
 
 TV = "archive/tv"
+
+
+def shellcheck() -> str:
+    """The binary from the shellcheck-py dev dependency, in this venv."""
+    return str(Path(sys.executable).parent / "shellcheck")
+
+
 MOVIES = "archive/movies"
 
 
@@ -96,6 +106,48 @@ def test_a_rule_folder_whose_share_is_missing_is_skipped(env):
 
     assert "doesn't exist" in result.stdout and "skipped" in result.stdout
     assert not env.nas.path("archive").exists()
+    assert result.returncode == 1  # the restore isn't complete
+    assert "2 units not restored because of an error" in result.stdout  # movies
+    assert env.nas.path("homes/alex/notes.txt").exists()  # the others go on
+
+
+@not_root
+def test_a_failed_copy_is_counted_and_the_script_fails(env):
+    drive = setup(env)
+    shutil.rmtree(env.nas.path(MOVIES))
+    shutil.rmtree(env.nas.path("homes/alex"))
+    drive.path("movies/Alien/S01E01.mkv").chmod(0)  # rsync can't read it
+    try:
+        result = run_script(env, drive.path(".baruch/restore.sh"), "--run")
+    finally:
+        drive.path("movies/Alien/S01E01.mkv").chmod(0o644)
+
+    out = result.stdout
+    assert result.returncode == 1, out
+    assert "!! movies/Alien: rsync failed (exit 23)" in out
+    assert "1 unit not restored because of an error" in out
+    assert env.nas.read("homes/alex/notes.txt") == drive.read("home/notes.txt")
+
+
+def test_the_script_passes_shellcheck(env):
+    drive = setup(env)
+    env.nas.add_show(TV, "Odd $(name) `x` 'q'", episodes=1, size=100)
+    tv_drive = env.register("BK-6A")
+    env.backup(tv_drive)
+    (drive.root / "stray.txt").write_text("x")  # unexplained data: a `note` line
+    env.backup(drive)
+
+    for script in (
+        drive.path(".baruch/restore.sh"),
+        tv_drive.path(".baruch/restore.sh"),
+    ):
+        result = subprocess.run(
+            [shellcheck(), "--shell=sh", "--severity=style", str(script)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout
 
 
 def test_the_script_finds_the_drive_wherever_it_is_mounted(env):

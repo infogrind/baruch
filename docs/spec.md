@@ -429,7 +429,13 @@ details live only in the configuration.
     only lists what it would copy (`rsync -n`). It never deletes on the NAS
     and keeps files there that are newer than the drive's (`rsync --update`),
     but lists every file it skips for that reason, with a count, in the dry
-    run and the real run; `--run --overwrite` copies those too. It never
+    run and the real run; `--run --overwrite` copies those too. A unit it
+    can't restore (rsync exits with an error, or its rule is skipped as
+    below) is marked `!!` with rsync's exit status, the others go on, and the
+    end says how many failed ("2 units not restored because of an error: fix
+    the cause and run this script again") and exits with status 1; status 0
+    means everything it set out to copy was copied (2: an unknown option, 1
+    also: no usable rsync). It never
     restores the `.backup-source` markers (it ends by saying to re-create them
     once every drive is restored, with the `touch` commands), finds the drive
     from its own location (the mount path may differ after a rebuild), and
@@ -1139,7 +1145,7 @@ generated per test, on the Mac (except the few listed below) and on Linux in
 GitHub Actions on every push. CI uses the distribution's rsync (≥ 3.2), found on
 the `PATH`.
 
-**Two kinds of tests**
+**Kinds of tests**
 
 1. **Logic tests (most of them):** the planner takes the configuration, the
    registry, the drives' cached records and file listings (path, size,
@@ -1149,6 +1155,9 @@ the `PATH`.
 1. **End-to-end tests:** a generated fake NAS and two or three fake drives in a
    temp folder, with real rsync and the real scanner. Tests "dock" drives in
    sequence, answer the plan's question, and check the result.
+1. **The restore script** is run with plain `sh` (bash's POSIX mode on the
+   Mac, dash on Linux CI) and checked with `shellcheck` (the `shellcheck-py`
+   dev dependency, so it's there wherever `uv run pytest` runs).
 1. **Fuzzing** (`tests/fuzz/`): `hypothesis` generates sequences of what a
    user and bad luck can do (edit the NAS, back up, prune, move, change the
    config, crash or interrupt rsync, fill the disk, forget a drive, roll back

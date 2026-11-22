@@ -95,6 +95,8 @@ proposing designs.
   `tests/support.py`): NAS unchanged, no write into an empty mount point, no
   file version or last backup lost unless the output named it. Opt out only
   for tests that change the NAS mid-command themselves (`env.check_loss`).
+- `restore.sh` runs under plain `sh` in the tests and must pass `shellcheck`
+  (dev dependency `shellcheck-py`).
 - Fuzzing (`tests/fuzz/`, hypothesis): random sequences of user actions and
   faults, each ending with a disaster and a restore with every drive's
   `restore.sh`, derandomized by default; `BARUCH_FUZZ=explore` for more. Turn any
