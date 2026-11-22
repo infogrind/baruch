@@ -1,4 +1,4 @@
-"""Sizes, shares and durations, all binary (KiB, MiB, GiB, TiB)."""
+"""Sizes, shares and durations, all binary (KiB, MiB, GiB, TiB); counts."""
 
 from __future__ import annotations
 
@@ -47,10 +47,11 @@ def human(n: int) -> str:
     """1536 -> '1.5 KiB'."""
     if abs(n) < 1024:
         return f"{n} B"
+    nf: float = n
     for unit in ("KiB", "MiB", "GiB", "TiB"):
-        n /= 1024
-        if abs(n) < 1024 or unit == "TiB":
-            return f"{n:.1f} {unit}"
+        nf /= 1024
+        if abs(nf) < 1024 or unit == "TiB":
+            return f"{nf:.1f} {unit}"
     raise AssertionError  # pragma: no cover
 
 
@@ -58,3 +59,8 @@ def percent(part: float, whole: float) -> str:
     if whole <= 0:
         return "100%"
     return f"{100 * part / whole:.0f}%"
+
+
+def count(n: int, one: str, many: str | None = None) -> str:
+    """`1 unit`, `2 units`."""
+    return f"{n} {one if n == 1 else many or one + 's'}"

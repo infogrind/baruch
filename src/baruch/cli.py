@@ -50,13 +50,11 @@ def parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="overwrite an unknown or invalid label"
     )
     register.set_defaults(func=commands.cmd_register)
-    forget = drive_sub.add_parser(
-        "forget", help="the copies on a drive no longer count"
-    )
+    forget = drive_sub.add_parser("forget", help="the data on a drive no longer counts")
     forget.add_argument("name")
     forget.set_defaults(func=commands.cmd_forget)
 
-    prune = sub.add_parser("prune", help="delete orphaned data on the docked drive")
+    prune = sub.add_parser("prune", help="delete stale data on the docked drive")
     prune.add_argument("drive")
     prune.set_defaults(func=commands.cmd_prune)
 
@@ -72,13 +70,6 @@ def parser() -> argparse.ArgumentParser:
     init = sub.add_parser("init", help="create an empty registry")
     init.set_defaults(func=commands.cmd_init)
 
-    registry = sub.add_parser("registry", help="restore the registry")
-    registry_sub = registry.add_subparsers(dest="registry_command", required=True)
-    restore = registry_sub.add_parser(
-        "restore", help="from the docked drive's snapshot"
-    )
-    restore.add_argument("--drive", help="the drive to use if several are docked")
-    restore.set_defaults(func=commands.cmd_registry_restore)
     return p
 
 

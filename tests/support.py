@@ -10,7 +10,9 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import re
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -229,6 +231,68 @@ class Drives:
         self.slots.clear()
 
 
+# The lost-data check, applied after every Baruch command a test runs.
+
+
+def _hash(path: Path) -> str:
+    if path.is_symlink():
+        return "link:" + os.readlink(path)
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
+def walk(root: Path, skip: tuple[Path, ...] = ()) -> dict[str, str]:
+    """Every file and symlink under `root`, with its content hash."""
+    out: dict[str, str] = {}
+    if not root.exists():
+        return out
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = Path(dirpath)
+        dirnames[:] = [d for d in dirnames if here / d not in skip]
+        for name in filenames + [d for d in dirnames if (here / d).is_symlink()]:
+            p = here / name
+            try:
+                out[os.path.relpath(p, root)] = _hash(p)
+            except OSError:
+                out[os.path.relpath(p, root)] = "unreadable"
+    return out
+
+
+def explained(rule: str, inner: str, output: str) -> bool:
+    """Did the command's output name this loss before it happened? Listed as
+    deleted or overwritten in a run's plan (or summarised as excluded names or
+    Baruch's own state), or counted in prune's "files only here"."""
+    folder = inner.split("/", 1)[0] if "/" in inner else "(files)"
+    rest = inner.split("/", 1)[1] if "/" in inner else inner
+    unit = f"{rule}/{folder}"
+    if unit not in output:
+        return False
+    if f"- {rest}" in output or f"~ {rest}" in output:
+        return True
+    after = output.split(unit, 1)[1][:3000]
+    if "excluded names" in after or "Baruch's own state" in after:
+        return True
+    m = re.search(re.escape(unit) + r":[^\n]*?(\d+) files only here", output)
+    return bool(m and int(m.group(1)) > 0)
+
+
+def listed(rule: str, inner: str, output: str) -> bool:
+    """A run's plan listed this file as deleted or overwritten (or summarised
+    it as excluded names or Baruch's own state)."""
+    folder = inner.split("/", 1)[0] if "/" in inner else "(files)"
+    rest = inner.split("/", 1)[1] if "/" in inner else inner
+    unit = f"{rule}/{folder}"
+    if unit not in output:
+        return False
+    if f"- {rest}" in output or f"~ {rest}" in output:
+        return True
+    after = output.split(unit, 1)[1][:3000]
+    return "excluded names" in after or "Baruch's own state" in after
+
+
+class SilentLoss(AssertionError):
+    pass
+
+
 @dataclass
 class Result:
     code: int
@@ -239,12 +303,18 @@ class Result:
         return self.out.rstrip("\n").splitlines()
 
 
+def rule(name: str, source: str, *drives: str) -> dict:
+    return {"name": name, "source": source, "drives": list(drives)}
+
+
 def pin(name: str, source: str, drive: str) -> dict:
-    return {"name": name, "source": source, "pin": drive}
+    """A rule with one drive: everything goes there."""
+    return rule(name, source, drive)
 
 
 def spread(name: str, source: str, drives: list[str]) -> dict:
-    return {"name": name, "source": source, "spread": drives}
+    """A rule with several drives, in order of preference."""
+    return rule(name, source, *drives)
 
 
 DEFAULT_SETTINGS = {
@@ -264,6 +334,8 @@ class Env:
     drives: Drives = field(init=False)
     config_dir: Path = field(init=False)
     state_dir: Path = field(init=False)
+    sources: dict[str, str] = field(default_factory=dict)  # rule -> NAS path
+    check_loss: bool = True  # the lost-data check after every command
 
     def __post_init__(self):
         self.nas = FakeNas(self.tmp / "volume1")
@@ -278,6 +350,7 @@ class Env:
     def config(self, rules: list[dict], drives: dict[str, str], **settings):
         merged = dict(DEFAULT_SETTINGS)
         merged.update(settings)
+        self.sources = {r["name"]: r["source"] for r in rules}
         doc = {
             "settings": merged,
             "drives": {name: {"reserve": reserve} for name, reserve in drives.items()},
@@ -300,8 +373,85 @@ class Env:
             stdout=stdout,
             interactive=interactive,
         )
-        code = main(list(argv), ctx)
+        before = self.snapshot() if self.check_loss else None
+        try:
+            code = main(list(argv), ctx)
+        finally:
+            if before is not None:
+                problems = self.loss_problems(before, stdout.getvalue())
+                if problems:
+                    raise SilentLoss(
+                        f"baruch {' '.join(argv)}:\n  "
+                        + "\n  ".join(problems)
+                        + "\n--- output ---\n"
+                        + stdout.getvalue()
+                    )
         return Result(code, stdout.getvalue())
+
+    def _own(self) -> tuple[Path, ...]:
+        return (self.config_dir, self.state_dir)
+
+    def snapshot(self) -> tuple[set, dict, set]:
+        """(rule, path in the rule's folder, content) on the NAS and on all
+        drives, docked or not; the NAS's files; and the same triples on the
+        drives only (the backups)."""
+        nas = walk(self.nas.root, skip=self._own())
+        found = set()
+        for rule, source in self.sources.items():
+            prefix = source.rstrip("/") + "/"
+            for rel, h in nas.items():
+                if rel.startswith(prefix) and h != "unreadable":
+                    found.add((rule, rel[len(prefix) :], h))
+        on_drives = set()
+        if self.drives.shelf.exists():
+            for disk in self.drives.shelf.iterdir():
+                skip = (disk / ".baruch", disk / "lost+found")
+                for rel, h in walk(disk, skip=skip).items():
+                    if "/" in rel and h != "unreadable":
+                        rule, inner = rel.split("/", 1)
+                        on_drives.add((rule, inner, h))
+        return found | on_drives, nas, on_drives
+
+    def loss_problems(self, before: tuple, output: str) -> list[str]:
+        versions_before, nas_before, drives_before = before
+        versions_after, nas_after, drives_after = self.snapshot()
+        problems = []
+        if nas_after != nas_before:
+            diff = sorted(set(nas_before.items()) ^ set(nas_after.items()))
+            problems.append(f"Baruch changed the NAS: {diff[:5]}")
+        if self.host.usb.exists():
+            for slot in self.host.usb.iterdir():
+                if not slot.is_symlink() and slot.is_dir() and any(slot.iterdir()):
+                    problems.append(f"written into the empty mount point {slot}")
+        # Content counts, not paths: a renamed folder copied again isn't a loss.
+        still = {(rule, h) for rule, _, h in versions_after}
+        lost: dict[tuple[str, str], list[str]] = {}
+        for rule, inner, h in sorted(versions_before):
+            if (rule, h) not in still:
+                lost.setdefault((rule, h), []).append(inner)
+        for (rule, h), paths in sorted(lost.items()):
+            if not any(explained(rule, inner, output) for inner in paths):
+                problems.append(
+                    f"LOST without warning: {rule}/{paths[0]} ({h}) is on no "
+                    "drive and not on the NAS any more"
+                )
+        # The last backup of something the NAS still has may only go if the
+        # output listed it (a run mirroring the NAS, or excluded names).
+        backed_before = {(rule, h) for rule, _, h in drives_before}
+        backed_after = {(rule, h) for rule, _, h in drives_after}
+        on_nas = {(rule, h) for rule, _, h in versions_after - drives_after}
+        gone_backups: dict[tuple[str, str], list[str]] = {}
+        for rule, inner, h in sorted(drives_before):
+            key = (rule, h)
+            if key in on_nas and key in backed_before and key not in backed_after:
+                gone_backups.setdefault(key, []).append(inner)
+        for (rule, h), paths in sorted(gone_backups.items()):
+            if not any(explained(rule, inner, output) for inner in paths):
+                problems.append(
+                    f"BACKUP LOST without warning: {rule}/{paths[0]} ({h}) is still "
+                    "on the NAS but on no drive any more"
+                )
+        return problems
 
     def ok(self, *argv: str, answers: str = "") -> Result:
         result = self.run(*argv, answers=answers)
@@ -311,8 +461,17 @@ class Env:
     def registry(self) -> dict:
         return yaml.safe_load((self.state_dir / "registry.yaml").read_text())
 
-    def unit(self, name: str) -> dict:
-        return self.registry()["units"][name]
+    def home(self, name: str) -> str | None:
+        return self.registry()["units"].get(name)
+
+    def records(self, drive: FakeDrive) -> dict:
+        """The records on a drive (it needn't be docked)."""
+        from baruch import records
+
+        return records.parse((drive.root / ".baruch" / "units.yaml").read_text())
+
+    def record(self, drive: FakeDrive, unit: str):
+        return self.records(drive).get(unit)
 
     def register(
         self, name: str, disk: str | None = None, capacity: int = 100_000
@@ -331,6 +490,21 @@ class Env:
             return self.run("run", *extra, answers=answers)
         finally:
             self.drives.undock(drive)
+
+
+def run_restore_script(env: Env, script: Path, *args: str):
+    """The drive's restore.sh with plain `sh`, Homebrew's rsync first on the
+    PATH (as on the NAS)."""
+    rsync_dir = os.path.dirname(env.host.rsync())
+    path = rsync_dir + os.pathsep + os.environ.get("PATH", "")
+    return subprocess.run(
+        ["sh", str(script), *args],
+        capture_output=True,
+        text=True,
+        errors="surrogateescape",  # names that aren't valid UTF-8
+        env={**os.environ, "PATH": path},
+        check=False,
+    )
 
 
 needs_linux = pytest.mark.skipif(

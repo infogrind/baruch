@@ -31,16 +31,16 @@ def test_missing_marker_skips_the_rule_and_touches_nothing(env):
     assert "gone" not in r.out.lower()
 
 
-def test_gone_unit_is_deleted_with_a_warning(env):
+def test_gone_unit_is_kept_by_runs_and_reported(env):
     a = setup(env)
     env.nas.delete(f"{TV}/Wire")
 
     r = env.backup(a)
 
-    assert "tv/Wire" in r.out and "gone" in r.out.lower()
-    assert any(line.startswith("WARNING") and "tv/Wire" in line for line in r.lines)
-    assert not a.exists("tv/Wire")
-    assert "tv/Wire" not in env.registry()["units"]
+    assert "1 unit of rule tv gone on the NAS" in r.out
+    assert "can be pruned" in r.out
+    assert a.exists("tv/Wire/S01E01.mkv")  # only prune removes it
+    assert "tv/Wire" in env.registry()["units"]
 
 
 def test_emptied_folder_whose_marker_survives_triggers_the_unit_loss_warning(env):
@@ -102,7 +102,7 @@ def test_unreadable_file_marks_the_unit_synced_with_errors(env):
 
     assert r.code == 0, r.out
     assert "S01E02.mkv" in r.out
-    assert env.unit("movies/Alien")["copies"]["BK-20A"]["result"] == "errors"
+    assert env.record(drive, "movies/Alien").result == "errors"
     assert drive.exists("movies/Alien/S01E01.mkv")
 
 
@@ -128,9 +128,11 @@ def test_drive_disappearing_mid_run_stops_and_records_nothing_for_that_unit(env)
 
     assert r.code != 0
     assert "no longer mounted" in r.out
-    units = env.registry()["units"]
-    synced = [name for name, u in units.items() if "BK-6A" in u.get("copies", {})]
-    assert len(synced) <= 1
+    recs = env.records(a)
+    assert [u for u, r in recs.items() if r.result == "ok" and u != "tv/(files)"] in (
+        [],
+        ["tv/B"],
+    )
 
 
 def test_renamed_show_is_a_gone_unit_plus_a_new_one(env):
@@ -139,6 +141,30 @@ def test_renamed_show_is_a_gone_unit_plus_a_new_one(env):
 
     r = env.backup(a)
 
-    assert "tv/Wire" in r.out and "tv/The Wire" in r.out
+    assert "tv/The Wire" in r.out and "gone on the NAS" in r.out
     assert a.exists("tv/The Wire/S01E01.mkv")
-    assert not a.exists("tv/Wire")
+    # The old folder stays until prune, so there's no moment without a copy.
+    assert a.exists("tv/Wire/S01E01.mkv")
+
+
+def test_a_gone_unit_without_data_anywhere_is_only_a_registry_change(env):
+    """Placed on a drive that never got a copy, then deleted on the NAS: the
+    entry goes, and the gone count (about data kept on drives) leaves it out."""
+    env.nas.add_show(TV, "Lost", episodes=2, size=10_000)
+    env.nas.mark(TV)
+    drives = {"BK-6A": "10%", "BK-6B": "10%"}
+    env.config(rules=[spread("tv", TV, list(drives))], drives=drives)
+    env.ok("init")
+    a, b = env.register("BK-6A"), env.register("BK-6B")
+    env.backup(a)
+    env.nas.add_show(TV, "Pilot", episodes=1, size=1_000)
+    env.backup(b)  # Pilot's home becomes BK-6A, which isn't docked
+    assert env.home("tv/Pilot") == "BK-6A"
+    env.nas.delete(f"{TV}/Pilot")
+
+    r = env.backup(a, "n")
+
+    assert "tv/Pilot: gone on the NAS, no data on any drive: entry removed" in r.out
+    assert "gone on the NAS: nothing is deleted" not in r.out
+    env.backup(a)
+    assert "tv/Pilot" not in env.registry()["units"]

@@ -59,11 +59,18 @@ def read_label(root: Path) -> Label | None | str:
 
 def write_label(root: Path, name: str) -> Label:
     label = Label(name, secrets.token_hex(8))
-    write_atomic(
+    write_to_drive(
         root / BARUCH_DIR / LABEL,
         yaml.safe_dump({"name": label.name, "disk_id": label.disk_id}),
     )
     return label
+
+
+def write_to_drive(path: Path, text: str) -> None:
+    """Write one of Baruch's files under /.baruch/ on a drive. Never creates
+    folders above it, so nothing lands in an empty mount point."""
+    path.parent.mkdir(exist_ok=True)
+    write_atomic(path, text, parents=False)
 
 
 def classify(path: Path, reg: Registry) -> Docked:
@@ -72,11 +79,11 @@ def classify(path: Path, reg: Registry) -> Docked:
         return Docked(path, None, "no label")
     if isinstance(label, str):
         return Docked(path, None, "bad label")
+    if label.disk_id in reg.forgotten:
+        return Docked(path, label, "forgotten")
     drive = reg.drives.get(label.name)
     if drive is None:
         return Docked(path, label, "unknown")
-    if drive.forgotten:
-        return Docked(path, label, "forgotten")
     if drive.disk_id != label.disk_id:
         return Docked(path, label, "mismatch")
     return Docked(path, label, "ok", label.name)
@@ -87,7 +94,7 @@ def docked(host, reg: Registry) -> list[Docked]:
 
 
 def still_there(host, d: Docked) -> bool:
-    """Mount check before each unit: still mounted, label still matches."""
+    """Mount check before each unit: still mounted, same label and disk ID."""
     if not host.is_mount(d.path):
         return False
     label = read_label(d.path)

@@ -2,15 +2,24 @@
 
 import os
 import stat
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from baruch import names
-from baruch.config import ConfigError, load
-from baruch.execute import RsyncError, check_rsync
-from baruch.registry import OK, Copy, Drive, Registry, Unit, dump, parse
-from baruch.sizes import human, parse_duration, parse_share, parse_size
+from baruch.config import ConfigError, describe, load
+from baruch.records import OK
+from baruch.registry import Drive, Registry, RegistryError, dump, parse
+from baruch.rsync import RsyncError, check_rsync
+from baruch.sizes import count, human, parse_duration, parse_share, parse_size
+
+
+def test_counts_use_the_singular_for_one():
+    assert count(1, "unit") == "1 unit"
+    assert count(0, "unit") == "0 units"
+    assert count(400, "unit") == "400 units"
+    assert count(1, "entry", "entries") == "1 entry"
+    assert count(2, "entry", "entries") == "2 entries"
 
 
 def test_sizes_are_binary():
@@ -62,38 +71,57 @@ drives:
   BK-20A: { reserve: 5% }
   BK-6A: { reserve: 500G }
 rules:
-  - { name: movies, source: /v/movies, pin: BK-20A }
-  - { name: tv, source: /v/tv, spread: [BK-6A, BK-20A] }
+  - { name: movies, source: /v/movies, drives: [BK-20A] }
+  - { name: tv, source: /v/tv, drives: [BK-6A, BK-20A] }
 """,
         )
     )
     assert cfg.drives["BK-20A"].reserve(1000) == 50
     assert cfg.drives["BK-6A"].reserve(10) == 500 * 1024**3
     assert cfg.rule("tv").drives == ["BK-6A", "BK-20A"]
-    assert cfg.rule("movies").pinned
+    assert describe(cfg.rule("movies")) == "movies: everything to BK-20A"
+
+
+DRIVES = "drives:\n  X: {}\n  Y: {}\n"
 
 
 @pytest.mark.parametrize(
     "rules, problem",
     [
-        ("- { name: a, source: /v/a, pin: X, spread: [X] }", "exactly one"),
-        ("- { name: a, source: /v/a }", "exactly one"),
-        ("- { name: 'a b', source: /v/a, pin: X }", "names may only use"),
-        ("- { name: a, source: /v/a, pin: X, exclude: [x] }", "global only"),
+        ("- { name: a, source: /v/a, drives: [X], pin: X }", "unknown key 'pin'"),
+        ("- { name: a, source: /v/a }", "needs `drives`"),
+        ("- { name: a, source: /v/a, drives: [] }", "needs `drives`"),
+        ("- { name: a, source: /v/a, drives: [X, X] }", "listed twice"),
+        ("- { name: a, source: /v/a, drives: [Z] }", "isn't listed under drives"),
+        ("- { name: 'a b', source: /v/a, drives: [X] }", "names may only use"),
+        ("- { name: a, source: /v/a, drives: [X], exclude: [x] }", "global only"),
         (
-            "- { name: a, source: /v, pin: X }\n- { name: b, source: /v/b, pin: X }",
+            "- { name: a, source: /v, drives: [X] }\n"
+            "- { name: b, source: /v/b, drives: [X] }",
             "inside",
         ),
         (
-            "- { name: a, source: /v, pin: X }\n- { name: a, source: /w, pin: X }",
+            "- { name: a, source: /v, drives: [X] }\n"
+            "- { name: a, source: /w, drives: [X] }",
             "more than once",
         ),
     ],
 )
 def test_config_problems(tmp_path, rules, problem):
     with pytest.raises(ConfigError) as e:
-        load(write(tmp_path, "rules:\n" + rules))
+        load(write(tmp_path, DRIVES + "rules:\n" + rules))
     assert problem in str(e.value)
+
+
+@pytest.mark.parametrize("pattern", [".backup-*", ".baruch", "lost*", "tv"])
+def test_excludes_may_not_hide_baruchs_own_names(tmp_path, pattern):
+    text = (
+        f'settings:\n  exclude: ["{pattern}"]\n'
+        + DRIVES
+        + "rules:\n- { name: tv, source: /v/tv, drives: [X] }"
+    )
+    with pytest.raises(ConfigError, match="can't be excluded"):
+        load(write(tmp_path, text))
 
 
 def test_unknown_settings_are_refused(tmp_path):
@@ -104,13 +132,17 @@ def test_unknown_settings_are_refused(tmp_path):
 def test_registry_round_trip():
     t = datetime(2026, 11, 14, 10, 5, tzinfo=UTC)
     reg = Registry()
-    reg.drives["BK-6A"] = Drive("abc", 100, 50, t, t, None)
-    reg.units[os.fsdecode(b"tv/Caf\xe9")] = Unit(
-        "BK-6A", date(2026, 11, 1), {"BK-6A": Copy(t, OK, 10, unverified=True)}
-    )
+    reg.drives["BK-6A"] = Drive("abc", 100, 50, t, t, None, 0, {"tv/X": "doesn't fit"})
+    reg.homes[os.fsdecode(b"tv/Caf\xe9")] = "BK-6A"
+    reg.forgotten = {"old1"}
     text = dump(reg)
     assert "2026-11-14T10:05:00Z" in text
     assert parse(text) == reg
+
+
+def test_registry_of_another_format_is_refused():
+    with pytest.raises(RegistryError, match="no format 2"):
+        parse("format: 1\nunits: {}\ndrives: {}\n")
 
 
 def fake_rsync(tmp_path, output):
@@ -129,7 +161,7 @@ def test_openrsync_and_old_rsync_are_refused(tmp_path):
 
 
 def test_rsync_messages_are_classified():
-    from baruch.execute import DriveError, DriveFull, classify
+    from baruch.rsync import DriveError, DriveFull, classify
 
     sender = 'rsync: [sender] send_files failed to open "/n/a": Permission denied (13)'
     gone = 'rsync: [sender] link_stat "/n/b" failed: No such file or directory (2)'

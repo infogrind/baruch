@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 from dataclasses import dataclass, field
@@ -49,16 +50,7 @@ class DriveConf:
 class Rule:
     name: str
     source: Path
-    pin: str | None = None
-    spread: list[str] | None = None
-
-    @property
-    def drives(self) -> list[str]:
-        return [self.pin] if self.pin else list(self.spread or [])
-
-    @property
-    def pinned(self) -> bool:
-        return self.pin is not None
+    drives: list[str] = field(default_factory=list)  # most preferred first
 
 
 @dataclass
@@ -68,8 +60,15 @@ class Config:
     rules: list[Rule]
     path: Path | None = None
 
-    def rule(self, name: str) -> Rule | None:
+    def find_rule(self, name: str) -> Rule | None:
         return next((r for r in self.rules if r.name == name), None)
+
+    def rule(self, name: str) -> Rule:
+        """The rule of a unit known to be in the config."""
+        rule = self.find_rule(name)
+        if rule is None:
+            raise KeyError(name)
+        return rule
 
 
 def load(path: Path) -> Config:
@@ -83,6 +82,7 @@ def load(path: Path) -> Config:
     settings = _settings(doc.get("settings") or {}, problems)
     drives = _drives(doc.get("drives") or {}, problems)
     rules = _rules(doc.get("rules") or [], problems)
+    _cross_checks(settings, drives, rules, problems)
     if problems:
         raise ConfigError(problems)
     return Config(settings, drives, rules, path)
@@ -142,7 +142,7 @@ def _rules(raw: list, problems: list[str]) -> list[Rule]:
         return rules
     for entry in raw:
         if not isinstance(entry, dict):
-            problems.append(f"rule {entry!r}: expected name, source and pin or spread")
+            problems.append(f"rule {entry!r}: expected name, source and drives")
             continue
         name = str(entry.get("name", ""))
         if not RULE_NAME.fullmatch(name):
@@ -157,20 +157,20 @@ def _rules(raw: list, problems: list[str]) -> list[Rule]:
             continue
         if not Path(str(entry["source"])).is_absolute():
             problems.append(f"rule {name!r}: source must be an absolute path")
-        pin, spread = entry.get("pin"), entry.get("spread")
-        if bool(pin) == bool(spread):
-            problems.append(f"rule {name!r}: needs exactly one of pin or spread")
-        if spread is not None and not isinstance(spread, list):
-            problems.append(f"rule {name!r}: spread must be a list of drives")
-            spread = None
-        rules.append(
-            Rule(
-                name,
-                Path(entry["source"]),
-                str(pin) if pin else None,
-                [str(d) for d in spread] if spread else None,
+        listed = entry.get("drives")
+        if not isinstance(listed, list) or not listed:
+            problems.append(
+                f"rule {name!r}: needs `drives`, a list of drives in order of "
+                "preference, e.g. drives: [BK-20A]"
             )
-        )
+            continue
+        listed = [str(d) for d in listed]
+        for d in sorted({d for d in listed if listed.count(d) > 1}):
+            problems.append(f"rule {name!r}: drive {d} is listed twice")
+        unknown = set(entry) - {"name", "source", "drives"}
+        for key in sorted(unknown):
+            problems.append(f"rule {name!r}: unknown key {key!r}")
+        rules.append(Rule(name, Path(str(entry["source"])), listed))
     names = [r.name for r in rules]
     for name in sorted({n for n in names if names.count(n) > 1}):
         problems.append(f"rule {name!r}: defined more than once")
@@ -197,6 +197,23 @@ def _rules(raw: list, problems: list[str]) -> list[Rule]:
     return rules
 
 
+def _cross_checks(settings, drives, rules, problems: list[str]) -> None:
+    for rule in rules:
+        for drive in rule.drives:
+            if drive not in drives:
+                problems.append(
+                    f"rule {rule.name!r}: drive {drive} isn't listed under drives"
+                )
+    protected = [MARKER, ".baruch", "lost+found"] + [r.name for r in rules]
+    for pattern in settings.exclude:
+        hit = [n for n in protected if fnmatch.fnmatchcase(n, pattern)]
+        if hit:
+            problems.append(
+                f"settings: exclude {pattern!r} matches {', '.join(hit)}, which "
+                "can't be excluded"
+            )
+
+
 def _real(path: Path) -> Path:
     """Resolves symlinks and `..`, so overlaps through them are found too."""
     return Path(os.path.realpath(path))
@@ -210,9 +227,10 @@ def check(config: Config) -> list[str]:
             problems.append(f"rule {rule.name!r}: source {rule.source} doesn't exist")
         elif not (rule.source / MARKER).exists():
             problems.append(f"rule {rule.name!r}: {rule.source} has no {MARKER} marker")
-        for drive in rule.drives:
-            if drive not in config.drives:
-                problems.append(
-                    f"rule {rule.name!r}: drive {drive} isn't listed under drives"
-                )
     return problems
+
+
+def describe(rule: Rule) -> str:
+    if len(rule.drives) == 1:
+        return f"{rule.name}: everything to {rule.drives[0]}"
+    return f"{rule.name}: each unit to one of {', '.join(rule.drives)}, in this order"
