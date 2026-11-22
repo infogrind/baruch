@@ -34,7 +34,13 @@ from baruch.execute import (
 )
 from baruch.records import ERRORS, IN_PROGRESS, OK, Record, RecordsError
 from baruch.registry import Drive, Registry, RegistryError, Store, folder_of, rule_of
-from baruch.render import render_plan, render_summary, reserve_lines, stale_lines
+from baruch.render import (
+    render_plan,
+    render_summary,
+    reserve_lines,
+    stale_lines,
+    start_line,
+)
 from baruch.restore import script as restore_script
 from baruch.rsync import DriveError, DriveGone, RsyncError, check_rsync, run_rsync
 from baruch.scan import FILE, DriveScan, TreeScan, scan_drive, scan_tree
@@ -514,8 +520,10 @@ def _execute(ctx, out, config, config_text, reg, store, state, plan, nas, rsync,
 
     busy = [op for op in plan.ops if op.has_changes]
     current = None
+    total = sum(op.write_bytes for op in busy)  # less what's skipped
+    done = 0
     try:
-        for op in busy:
+        for i, op in enumerate(busy, 1):
             current = op
             ensure_mounted(ctx.host, d)
             _, free_now = ctx.host.disk_usage(d.path)
@@ -523,12 +531,15 @@ def _execute(ctx, out, config, config_text, reg, store, state, plan, nas, rsync,
             if free_now + op.delete_bytes - op.needs < floor:
                 out(f"{names.display(op.unit)}: skipped, doesn't fit any more")
                 left_out[op.unit] = "doesn't fit"
+                total -= op.write_bytes
                 current = None
                 continue
+            out(start_line(i, len(busy), op, done, total, ctx.host.now()))
             started = start_unit(state, op.unit, ctx.host.now()).started
             rule = config.rule(op.rule)
             result = sync_unit(op, d.path, rule.source, rsync)
             finish_unit(state, op.unit, started, result, ctx.host.now())
+            done += op.write_bytes
             status = "done" if result == OK else "synced with errors"
             out(f"{names.display(op.unit)}: {status}")
             for m in op.messages + op.errors:

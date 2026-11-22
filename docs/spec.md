@@ -333,6 +333,15 @@ details live only in the configuration.
     end-of-run writes. Within each group, largest first. Within a unit,
     deletions come first, then copies.
 
+    **Progress:** as each unit with files to copy or delete starts, the run
+    prints a line with its place among them, the time (UTC), what it copies
+    and deletes, and the bytes copied so far of the run's total
+    (`[3/12] 20:31 home/Photos: copying 1204 files, 48.2 GiB (61.0 GiB of 212.4 GiB copied so far)`); when it finishes, `home/Photos: done` (or
+    "synced with errors", with the files). A unit skipped because it doesn't
+    fit any more is left out of the total. Units with nothing to copy or
+    delete only get their new records, without a line. There's no progress
+    within a unit.
+
 01. **Space:** right before each unit, the fit check is repeated with the
     drive's current free space: the unit's net bytes (what the run would write
     less what it would delete) must fit in the free space; existing units may

@@ -747,7 +747,16 @@ Without a usable drive, `run` lists the mounted USB volumes and why each isn't
 used. Before each unit it checks that the drive is still mounted and its label
 still matches, and stops otherwise. Before it syncs a unit, it marks it as in
 progress on the drive itself (and in the NAS's cache), so an interrupted unit
-is never mistaken for a complete one. It never deletes a whole unit. Ctrl-C
+is never mistaken for a complete one. As each unit starts it prints where the
+run stands, and a line again when the unit is done:
+
+```
+[3/12] 20:31 home/Photos: copying 1204 files, 48.2 GiB (61.0 GiB of 212.4 GiB copied so far)
+home/Photos: done
+```
+
+There's no progress within a unit; `df -h` on the drive shows it growing. It
+never deletes a whole unit. Ctrl-C
 stops the run; finished units stay recorded. The plan file is the run's log,
 with the results added; logs are kept for 90 days.
 
