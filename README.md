@@ -803,11 +803,13 @@ known can't be taken over.
 
 If the disk already carries a label with this name that the registry doesn't
 know (after Baruch's state was lost), it offers to take the disk over as it is,
-keeping its label and records.
+keeping its label and records. If the disk has a label but no records
+(`/.baruch/units.yaml`), it can't be taken over: `--force` gives it a new label
+and starts its records afresh.
 
 | Option | Meaning |
 | --- | --- |
-| `--force` | Overwrite an unknown or invalid label, after showing it. Never overwrites the valid label of a registered drive. Old data on the disk is left for you or `prune` to delete. |
+| `--force` | Overwrite an unknown or invalid label, after showing it, instead of taking the disk over. Never overwrites the valid label of a registered drive. Old data on the disk is left for you or `prune` to delete. |
 
 ### `baruch drive forget NAME`
 
