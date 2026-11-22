@@ -35,6 +35,27 @@ def test_first_run_copies_every_unit_as_first_copy(env):
     assert drive.path("movies/Alien/S01E01.mkv").stat().st_mtime == src.st_mtime
 
 
+def test_each_unit_announces_itself_with_where_the_run_stands(env):
+    drive = setup_movies(env)
+
+    r = env.backup(drive)
+
+    starts = [line for line in r.lines if line.startswith("[")]
+    assert len(starts) == 3
+    assert starts[0].startswith("[1/3] ")  # largest first
+    assert "movies/Heat (1995): copying 3 files, 2.9 KiB " in starts[0]
+    assert "(0 B of 5.0 KiB copied so far)" in starts[0]
+    assert starts[1].startswith("[2/3] ") and "(2.9 KiB of 5.0 KiB" in starts[1]
+    done = r.out.index("movies/Heat (1995): done")
+    assert r.out.index(starts[0]) < done < r.out.index(starts[1])
+
+    env.nas.delete("archive/movies/Alien/S01E02.mkv")
+    r = env.backup(drive)
+
+    (start,) = [line for line in r.lines if line.startswith("[")]
+    assert "[1/1] " in start and "movies/Alien: deleting 1 file " in start
+
+
 def test_first_run_records_units_and_copies(env):
     drive = setup_movies(env)
     env.backup(drive)

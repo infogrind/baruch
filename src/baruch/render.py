@@ -4,6 +4,7 @@ right above the question, where the terminal shows them first."""
 from __future__ import annotations
 
 import posixpath
+from datetime import UTC, datetime
 
 from baruch import names, stale
 from baruch.planner import FIRST, Plan, UnitOp
@@ -239,3 +240,17 @@ def _age(mtime: int) -> str:
     if not mtime:
         return ""
     return "changed " + datetime.fromtimestamp(mtime, UTC).strftime("%Y-%m-%d")
+
+
+def start_line(i: int, n: int, op: UnitOp, done: int, total: int, now: datetime) -> str:
+    """The line printed as a unit's sync starts: where the run stands."""
+    what = []
+    if op.transfer:
+        what.append(f"copying {count(op.copy_files, 'file')}, {human(op.write_bytes)}")
+    if op.delete:
+        what.append(f"deleting {count(op.delete_files, 'file')}")
+    return (
+        f"[{i}/{n}] {now.astimezone(UTC).strftime('%H:%M')} "
+        f"{names.display(op.unit)}: {', '.join(what)} "
+        f"({human(done)} of {human(total)} copied so far)"
+    )
