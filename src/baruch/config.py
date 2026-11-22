@@ -178,10 +178,16 @@ def _rules(raw: list, problems: list[str]) -> list[Rule]:
         for b in rules[i + 1 :]:
             sa, sb = _real(a.source), _real(b.source)
             if sa == sb:
-                problems.append(
-                    f"rules {a.name!r} and {b.name!r} have the same source; "
-                    "sources must not overlap"
-                )
+                # Two copies of one source: fine, as long as they're on
+                # different drives (two copies on one disk protect nothing).
+                common = [d for d in a.drives if d in b.drives]
+                if common:
+                    problems.append(
+                        f"rules {a.name!r} and {b.name!r} have the same source and "
+                        f"{'drives' if len(common) > 1 else 'drive'} "
+                        f"{', '.join(common)} in common; rules with the same "
+                        "source must have no drive in common"
+                    )
                 continue
             if sb.is_relative_to(sa):
                 inner, outer = b, a

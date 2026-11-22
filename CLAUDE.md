@@ -46,7 +46,9 @@ proposing designs.
   exactly the plan. No scheduler, no eject, no notifications.
 - **Safety:** source marker `.backup-source` must exist; nothing outside the
   plan is changed; every deletion is listed right above the question.
-- Sources never overlap, and Baruch never looks outside rule sources.
+- Sources never overlap (one inside another), and Baruch never looks outside
+  rule sources. Two rules may share a source if their drive lists have no drive
+  in common: independent copies (e.g. `home` on `BK-20A`, `home-1t` on `BK-1T`).
 - Planned real setup: one rule per folder in `/volume1/archive`, plus `home` and
   `projects`. Everything goes to `BK-20A` except `tv`, which is spread over
   `BK-6A`, `BK-6B`, `BK-20A`.

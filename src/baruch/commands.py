@@ -165,14 +165,16 @@ def own_files(ctx: Context) -> list[Path]:
     return [ctx.config_dir, ctx.state_dir]
 
 
-def own_state(ctx: Context, config: Config) -> tuple[str, str] | None:
-    """Baruch's state folder as (rule, path inside the rule's folder)."""
+def own_state(ctx: Context, config: Config) -> dict[str, str]:
+    """Baruch's state folder, per rule whose source holds it (several rules
+    can share a source): rule -> path inside the rule's folder."""
     state = Path(os.path.realpath(ctx.state_dir))
+    out = {}
     for rule in config.rules:
         source = Path(os.path.realpath(rule.source))
         if state.is_relative_to(source) and state != source:
-            return rule.name, str(state.relative_to(source))
-    return None
+            out[rule.name] = str(state.relative_to(source))
+    return out
 
 
 def load_caches(store: Store, reg: Registry, out: Out | None = None) -> dict:

@@ -361,7 +361,7 @@ def test_baruchs_own_state_doesnt_count_towards_the_warnings():
         changed,
         disk=disk,
         recs={"home/.local": ok()},
-        own_state=("home", ".local/state/baruch"),
+        own_state={"home": ".local/state/baruch"},
     )
     (op,) = ops(p)
     assert op.own == [".local/state/baruch/registry.yaml"]
