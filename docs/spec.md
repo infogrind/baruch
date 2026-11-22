@@ -524,7 +524,10 @@ details live only in the configuration.
       label already carries NAME, the registry has no drive of that name, and
       its disk ID isn't a forgotten one, `register` shows the disk ID, what
       the disk holds and its newest `synced` time, and asks to take it over as
-      it is: the label and the records on the disk are kept.
+      it is: the label and the records on the disk are kept. If its
+      `units.yaml` is missing or can't be read, it refuses and names
+      `--force`. With `--force` there's no takeover: the label is overwritten
+      as above and the records start afresh.
 01. `baruch drive forget NAME` tells Baruch that the data on the drive's disk
     no longer counts: it broke, got lost, or the user simply doesn't want to use
     it for backups anymore (its data may still be kept). Baruch can't tell these

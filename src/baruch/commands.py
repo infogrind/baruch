@@ -837,8 +837,9 @@ def cmd_register(ctx: Context, args) -> int:
             "no units until it is."
         )
     label = d.label
-    takeover = (
-        label is not None
+    takeover = (  # --force: overwrite the label instead (asked below)
+        not args.force
+        and label is not None
         and d.status == "unknown"
         and label.name == name
         and name not in reg.drives
@@ -856,7 +857,11 @@ def cmd_register(ctx: Context, args) -> int:
         try:
             recs = records.read(d.path)
         except RecordsError as e:
-            raise Fail(f"{e}: can't take this disk over as it is.") from None
+            raise Fail(
+                f"{e}: can't take this disk over as it is. To give it a new "
+                "label and start its records afresh (its data then counts as "
+                f"unrecorded): `baruch drive register {name} --force`."
+            ) from None
         newest = max((r.synced for r in recs.values() if r.synced), default=None)
         out(
             f"This disk carries the label {name}, disk ID {label.disk_id}, which "

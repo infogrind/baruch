@@ -247,3 +247,33 @@ def test_register_force_starts_the_records_afresh(env):
     # Its data counts as unrecorded: synced again, listed file by file.
     r = env.run("run", answers="y")
     assert "existing folder, no record yet" in r.out
+
+
+def test_a_disk_with_a_label_but_no_records_names_force(env):
+    setup(env)
+    a = env.register("BK-6A")
+    _lose_state(env)
+    (a.root / ".baruch" / "units.yaml").unlink()
+    env.drives.dock(a)
+
+    r = env.run("drive", "register", "BK-6A", answers="y")
+
+    assert r.code != 0
+    assert "can't take this disk over" in r.out
+    assert "baruch drive register BK-6A --force" in r.out
+
+
+def test_register_force_skips_the_takeover(env):
+    setup(env)
+    a = env.register("BK-6A")
+    old = (a.root / ".baruch" / "label.yaml").read_text()
+    _lose_state(env)
+    (a.root / ".baruch" / "units.yaml").unlink()
+    env.drives.dock(a)
+
+    r = env.run("drive", "register", "BK-6A", "--force", answers="y")
+
+    assert r.code == 0, r.out
+    assert "Take it over" not in r.out and "Existing label: BK-6A" in r.out
+    assert (a.root / ".baruch" / "label.yaml").read_text() != old  # new disk ID
+    assert env.records(a) == {}
