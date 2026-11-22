@@ -237,7 +237,7 @@ def script(
     """`home_units`: units whose home is this drive; `items`: its stale and
     unexplained data, as `stale.classify` sees it now."""
     rules = {r.name: r for r in config.rules}
-    second = {i.unit: i for i in stale.for_restore(items)}
+    second = {i.unit: i for i in stale.for_restore(items) if i.unit}
     lines = [HEADER.replace("__DRIVE__", drive).replace("__WHEN__", show(now))]
     for rule in order(config, own_files):
         for u in sorted(home_units):

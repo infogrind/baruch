@@ -60,7 +60,9 @@ class UnitResult:
     messages: list[str] = field(default_factory=list)
 
 
-def run_rsync(rsync: str, source: Path, dest: Path, rels: list[str], partial: Path):
+def run_rsync(
+    rsync: str, source: Path, dest: Path, rels: list[str], partial: Path
+) -> tuple[int, str]:
     dest.mkdir(parents=True, exist_ok=True)
     partial.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("wb", delete=False, suffix=".list") as f:

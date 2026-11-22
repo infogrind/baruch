@@ -47,10 +47,11 @@ def human(n: int) -> str:
     """1536 -> '1.5 KiB'."""
     if abs(n) < 1024:
         return f"{n} B"
+    nf: float = n
     for unit in ("KiB", "MiB", "GiB", "TiB"):
-        n /= 1024
-        if abs(n) < 1024 or unit == "TiB":
-            return f"{n:.1f} {unit}"
+        nf /= 1024
+        if abs(nf) < 1024 or unit == "TiB":
+            return f"{nf:.1f} {unit}"
     raise AssertionError  # pragma: no cover
 
 

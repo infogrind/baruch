@@ -873,6 +873,7 @@ up too.
 uv sync
 uv run pytest
 uv run ruff check .
+uv run ty check
 ```
 
 Tests run on the Mac and on Linux in GitHub Actions. They use synthetic data

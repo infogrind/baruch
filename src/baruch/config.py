@@ -60,8 +60,15 @@ class Config:
     rules: list[Rule]
     path: Path | None = None
 
-    def rule(self, name: str) -> Rule | None:
+    def find_rule(self, name: str) -> Rule | None:
         return next((r for r in self.rules if r.name == name), None)
+
+    def rule(self, name: str) -> Rule:
+        """The rule of a unit known to be in the config."""
+        rule = self.find_rule(name)
+        if rule is None:
+            raise KeyError(name)
+        return rule
 
 
 def load(path: Path) -> Config:

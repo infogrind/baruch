@@ -1106,7 +1106,7 @@ through the personal Homebrew tap (`infogrind/homebrew-tap`, published with
 | uv | not installed yet | installed |
 
 - **Language and tooling:** Python ≥ 3.12, uv with hatchling as build backend,
-  ruff, pytest.
+  ruff, ty, pytest.
 - **Dependencies:** PyYAML is the only Python library. rsync runs as a separate
   program. Baruch uses Homebrew's, `<Homebrew prefix>/opt/rsync/bin/rsync`
   (`/home/linuxbrew/.linuxbrew` on the NAS, `/opt/homebrew` on the Mac), and

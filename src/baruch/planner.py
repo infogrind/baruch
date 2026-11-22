@@ -19,6 +19,7 @@ from baruch.records import IN_PROGRESS, Record
 from baruch.registry import Registry, folder_of, rule_of
 from baruch.scan import DIR, FILES_UNIT, DriveScan, TreeScan, UnitScan, excluded
 from baruch.sizes import count, human
+from baruch.stale import Item as StaleItem
 
 FIRST = "first"  # no data on this drive yet: one summary line
 SYNC = "sync"  # data here: every new, changed and deleted file is listed
@@ -89,7 +90,7 @@ class Plan:
     drive_errors: list[tuple[str, str]] = field(default_factory=list)
     unreadable: list[tuple[str, str]] = field(default_factory=list)
     gone: dict[str, list[str]] = field(default_factory=dict)  # rule -> units
-    stale: list[stale.Item] = field(default_factory=list)
+    stale: list[StaleItem] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     free_after: int = 0
     largest: list[tuple[str, int, int]] = field(default_factory=list)
@@ -232,7 +233,7 @@ def make_plan(
     reserve = conf.reserve(capacity) if conf else 0
     plan = Plan(drive, takes_units, reserve, free)
     rules = {r.name: r for r in config.rules}
-    homes = dict(reg.homes)
+    homes: dict[str, str | None] = dict(reg.homes)
 
     def disk_unit(unit: str) -> UnitScan | None:
         tree = disk.folders.get(rule_of(unit))
@@ -342,7 +343,8 @@ def make_plan(
         if home is None or home == drive or unit not in nas_units:
             continue
         c = caches.get(home)
-        there = c.unit(unit).size if c and c.unit(unit) else 0
+        cu = c.unit(unit) if c else None
+        there = cu.size if cu else 0
         pending[home] = pending.get(home, 0) + max(0, sizes[unit] - there)
 
     sim = free  # the docked drive's free space as the run goes on
@@ -542,7 +544,7 @@ def _reserve_report(plan, config, reg, homes, disk, caches, pending) -> None:
             continue
         tree = disk.folders.get(rule_of(unit))
         du = tree.units.get(folder_of(unit)) if tree else None
-        if has_data(du):
+        if du and du.entries:
             units.append((unit, du.size, du.newest))
     plan.largest = sorted(units, key=lambda t: (-t[1], t[0]))[:10]
     for rule in config.rules:

@@ -430,6 +430,7 @@ def cmd_run(ctx: Context, args) -> int:
         lock(ctx, store)
     reg = get_registry(store)
     d = choose_drive(ctx, out, reg, args.drive)
+    assert d.name  # a usable drive is registered
     rsync = ctx.host.rsync()
     try:
         check_rsync(rsync)
@@ -765,7 +766,7 @@ def cmd_move_set(ctx: Context, args) -> int:
             out("Nothing changed.")
             return 0
         unit = similar[int(answer) - 1]
-    rule = config.rule(rule_of(unit))
+    rule = config.find_rule(rule_of(unit))
     if rule is None:
         raise Fail(f"Rule {rule_of(unit)} isn't in the config.")
     if unit in scan_state.get("gone", []):
@@ -951,6 +952,7 @@ def cmd_prune(ctx: Context, args) -> int:
     lock(ctx, store)
     reg = get_registry(store)
     d = choose_drive(ctx, out, reg, args.drive)
+    assert d.name  # a usable drive is registered
     now = ctx.host.now()
     recs, disk = read_drive(config, d)
     nas = scan_nas(config)
@@ -1013,6 +1015,7 @@ def cmd_prune(ctx: Context, args) -> int:
         return 0
     deleted = 0
     for i in prune:
+        assert i.unit  # only stale units are pruned
         ensure_mounted(ctx.host, d)
         rule = config.rule(rule_of(i.unit))
         folder = folder_of(i.unit)
@@ -1026,8 +1029,10 @@ def cmd_prune(ctx: Context, args) -> int:
     # Gone units whose data no drive holds any more lose their entry.
     all_caches = dict(caches) | {d.name: state.cache}
     for i in prune:
-        if i.kind == stale.GONE and not any(
-            c.has_data(i.unit) for c in all_caches.values()
+        if (
+            i.unit
+            and i.kind == stale.GONE
+            and not any(c.has_data(i.unit) for c in all_caches.values())
         ):
             reg.homes.pop(i.unit, None)
     recs_now, disk_now = (
@@ -1074,6 +1079,7 @@ def cmd_verify(ctx: Context, args) -> int:
     lock(ctx, store)
     reg = get_registry(store)
     d = choose_drive(ctx, out, reg, args.drive)
+    assert d.name  # a usable drive is registered
     now = ctx.host.now()
     recs, disk = read_drive(config, d)
     state = drive_state(ctx, config, store, d, recs, disk, now)
@@ -1083,9 +1089,11 @@ def cmd_verify(ctx: Context, args) -> int:
     unclear: list[tuple[Path, Path]] = []
     for unit in sorted(u for u, h in reg.homes.items() if h == d.name):
         rec = recs.get(unit)
-        rule = config.rule(rule_of(unit))
-        scan = nas.get(rule.name) if rule else None
-        if rec is None or not rec.complete or scan is None:
+        rule = config.find_rule(rule_of(unit))
+        if rule is None or rec is None or not rec.complete:
+            continue
+        scan = nas.get(rule.name)
+        if scan is None:
             continue
         nu = scan.units.get(folder_of(unit))
         if nu is None:

@@ -67,7 +67,7 @@ proposing designs.
 
 ## Tech stack
 
-- Python ≥ 3.12, uv, hatchling build backend, ruff, pytest. Only Python
+- Python ≥ 3.12, uv, hatchling build backend, ruff, ty, pytest. Only Python
   dependency: PyYAML.
 - rsync is called as a subprocess: Homebrew's (`<prefix>/opt/rsync/bin/rsync`),
   else the one on the `PATH` (Linux CI: the distribution's). No config setting.

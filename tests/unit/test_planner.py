@@ -38,7 +38,7 @@ def tree(units: dict[str, dict], marker: bool = False) -> TreeScan:
     return t
 
 
-def nas(**rules: dict) -> dict[str, TreeScan]:
+def nas(**rules: dict) -> dict[str, TreeScan | None]:
     return {name: tree(units, marker=True) for name, units in rules.items()}
 
 

@@ -113,8 +113,11 @@ def test_cache_round_trip(tmp_path):
     c.contents.loose["stray.txt"] = Entry(FILE, 3, 4)
     cache.save(tmp_path, "BK-6A", c)
     back = cache.load(tmp_path, "BK-6A")
+    assert back is not None
     assert back.records == c.records
-    assert back.unit("tv/The Wire").entries == unit.entries
+    back_unit = back.unit("tv/The Wire")
+    assert back_unit is not None
+    assert back_unit.entries == unit.entries
     assert back.contents.loose == c.contents.loose
     assert back.complete("tv/The Wire") == Record(T1, T2, OK)
 
@@ -156,6 +159,7 @@ def test_saved_versions_keep_registry_and_cached_records(tmp_path):
     (version,) = store.versions.iterdir()
     assert (version / "registry.yaml").exists()
     saved = cache.load(version / "cache", "BK-6A")
+    assert saved is not None
     assert saved.records == c.records
     assert saved.unit("tv/X") is None  # contents come back with the next scan
 

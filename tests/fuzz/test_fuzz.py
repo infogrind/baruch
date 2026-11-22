@@ -147,7 +147,8 @@ class Baruch(RuleBasedStateMachine):
                 real(*args, **kwargs)  # "after-copy": the copy, then a crash
                 raise Crash
 
-            execute.run_rsync = faulty
+            # A test double: ty types the attribute as exactly the real function.
+            execute.run_rsync = faulty  # ty: ignore[invalid-assignment]
         result = "crash"
         try:
             r = self.env.run(*argv, answers=answers)
