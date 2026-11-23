@@ -1,0 +1,4 @@
+#!/bin/sh
+# `baruch` in the demo sandbox: BARUCH_DEMO=<dir> demo/baruch run
+here=$(cd "$(dirname "$0")" && pwd)
+exec uv run --quiet --project "$here/.." python "$here/sandbox.py" baruch "${BARUCH_DEMO:?set BARUCH_DEMO to the sandbox folder}" "$@"
