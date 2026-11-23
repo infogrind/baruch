@@ -59,7 +59,17 @@ def test_the_scanner_reports_each_unit_and_the_running_totals(tmp_path):
     assert seen[0] == ("Lost", 0, 0)
     assert ("Lost", 2, 300) in seen
     assert ("Wire", 2, 300) in seen  # starting the next unit
-    assert seen[-1] == ("Wire", 4, 357)  # notes.txt comes after the folders
+    assert seen[-1] == ("(files)", 4, 357)  # notes.txt, after the folders
+
+
+def test_files_before_the_first_folder_count_as_the_files_unit(tmp_path):
+    make(tmp_path, ".backup-source", 0)
+    make(tmp_path, "Lost/E01.mkv", 10)
+    seen = []
+
+    scan_tree(tmp_path, [], progress=lambda *a: seen.append(a))
+
+    assert seen[0] == ("(files)", 1, 0)
 
 
 def test_a_drive_scan_counts_across_its_folders(tmp_path):

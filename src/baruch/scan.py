@@ -177,6 +177,7 @@ def scan_tree(
             out.units[item.name] = unit
         else:
             files_unit.entries[item.name] = entry
+            tally.unit = FILES_UNIT
             tally.add(entry)
     out.units[FILES_UNIT] = files_unit
     return out
