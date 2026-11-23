@@ -111,7 +111,7 @@ def dock(env: Env, name: str) -> None:
 def change(env: Env) -> None:
     env.host.advance(days=3)
     env.nas.add_show("archive/tv", "Severance", episodes=19, size=45 * MiB)
-    for n in range(1, 41):
+    for n in range(1, 4):
         env.nas.add(f"homes/alex/Photos/2026/IMG_{150 + n:04d}.jpg", size=60_000)
     for n in range(1, 6):
         env.nas.replace(f"homes/alex/Documents/letter-{n:03d}.txt", size=3_500)

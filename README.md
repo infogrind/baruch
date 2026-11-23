@@ -10,6 +10,11 @@ Baruch was Jeremiah's scribe, who wrote the burned scroll out again (Jeremiah
 > yet. The full specification is [`docs/spec.md`](docs/spec.md), which wins if
 > the two disagree.
 
+![baruch run on a docked drive, then baruch status](docs/demo.gif)
+
+The demo runs in a sandbox (`demo/`): the test suite's fake NAS and drives,
+real rsync, the real CLI. Re-record it with `vhs demo/demo.tape`.
+
 ## What it does
 
 You have more data than fits on one backup disk, and a USB dock that holds one
