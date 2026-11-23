@@ -1,6 +1,6 @@
 [project]
 name = "baruch"
-version = "0.3.0"
+version = "0.3.1"
 description = "Rule-based backup of a Synology NAS to several drives, docked one at a time"
 readme = "README.md"
 license = "MIT"
