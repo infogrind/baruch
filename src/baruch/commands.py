@@ -1210,12 +1210,43 @@ def _where_else(i: stale.Item) -> str:
 # verify
 
 
-def _hash(path: Path) -> str:
+def _hash(path: Path, read=None) -> str:
+    """`read(n)` is told about each block as it's read."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):
             h.update(block)
+            if read:
+                read(len(block))
     return h.hexdigest()
+
+
+def _check_file(d, rule, rel, e, unit, reading, changed, read_errors, unclear):
+    """One file of a unit: the same on the drive as on the NAS?"""
+    drive_file = d.path / rule.name / rel
+    nas_file = rule.source / rel
+    try:
+        st = os.lstat(drive_file)
+    except (FileNotFoundError, NotADirectoryError):
+        changed.append(f"{rule.name}/{rel}")
+        return
+    except OSError:
+        read_errors.setdefault(unit, []).append(rel)
+        return
+    if st.st_size != e.size or int(st.st_mtime) != e.mtime:
+        changed.append(f"{rule.name}/{rel}")
+        return
+    try:
+        drive_hash = _hash(drive_file, reading)
+    except OSError:
+        read_errors.setdefault(unit, []).append(rel)
+        return
+    try:
+        nas_hash = _hash(nas_file, reading)
+    except OSError:
+        return
+    if drive_hash != nas_hash:
+        unclear.append((nas_file, drive_file))
 
 
 def cmd_verify(ctx: Context, args) -> int:
@@ -1234,6 +1265,7 @@ def cmd_verify(ctx: Context, args) -> int:
     read_errors: dict[str, list[str]] = {}  # unit -> rels
     changed: list[str] = []
     unclear: list[tuple[Path, Path]] = []
+    checks = []  # (unit, rule, the unit on the NAS)
     for unit in sorted(u for u, h in reg.homes.items() if h == d.name):
         rec = recs.get(unit)
         rule = config.find_rule(rule_of(unit))
@@ -1243,36 +1275,36 @@ def cmd_verify(ctx: Context, args) -> int:
         if scan is None:
             continue
         nu = scan.units.get(folder_of(unit))
-        if nu is None:
-            continue
+        if nu is not None:
+            checks.append((unit, rule, nu))
+    total = sum(e.size for _, _, nu in checks for e in nu.entries.values())
+    files = sum(1 for _, _, nu in checks for e in nu.entries.values() if e.kind == FILE)
+    done = 0  # bytes read, on both sides
+    what = ""
+
+    def reading(n: int) -> None:
+        nonlocal done
+        done += n
+        out.status(what, f"{human(done // 2)} of {human(total)}")
+
+    for i, (unit, rule, nu) in enumerate(checks, 1):
+        what = f"Verifying [{i}/{len(checks)}] {names.display(unit)}"
+        reading(0)
         ensure_mounted(ctx.host, d)
         for rel, e in nu.entries.items():
             if e.kind != FILE:
                 continue
-            drive_file = d.path / rule.name / rel
-            nas_file = rule.source / rel
-            try:
-                st = os.lstat(drive_file)
-            except (FileNotFoundError, NotADirectoryError):
-                changed.append(f"{rule.name}/{rel}")
-                continue
-            except OSError:
-                read_errors.setdefault(unit, []).append(rel)
-                continue
-            if st.st_size != e.size or int(st.st_mtime) != e.mtime:
-                changed.append(f"{rule.name}/{rel}")
-                continue
-            try:
-                drive_hash = _hash(drive_file)
-            except OSError:
-                read_errors.setdefault(unit, []).append(rel)
-                continue
-            try:
-                nas_hash = _hash(nas_file)
-            except OSError:
-                continue
-            if drive_hash != nas_hash:
-                unclear.append((nas_file, drive_file))
+            before = done
+            _check_file(d, rule, rel, e, unit, reading, changed, read_errors, unclear)
+            done = before + 2 * e.size  # whatever was read
+    out(
+        Line(
+            f"Verified {count(len(checks), 'unit')}, {count(files, 'file')}, "
+            f"{human(total)}",
+            style.OK,
+        )
+    )
+
     if changed:
         out(
             f"{count(len(changed), 'file')} changed on the NAS since the last sync "

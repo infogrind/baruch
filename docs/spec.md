@@ -691,7 +691,12 @@ details live only in the configuration.
     The contents list, cache, restore script, last seen and free space are
     rewritten afterwards. `prune` records last seen and free space too; a run
     answered `n` doesn't. A full verify of a drive's home units takes ~16–25 hours for BK-20A (~8.3 TiB at
-    100–160 MB/s), ~10–17 hours for a full 6 TB drive.
+    100–160 MB/s), ~10–17 hours for a full 6 TB drive. On a terminal, a
+    status line shows the unit being compared, its place among them and the
+    bytes compared so far of the total
+    (`Verifying [12/870] tv/The Wire  48.2 GiB of 9.1 TiB`). When the
+    comparison is done, a line says what it covered
+    (`Verified 870 units, 412003 files, 9.1 TiB`), then come the results.
 
 ## State and unit states
 
