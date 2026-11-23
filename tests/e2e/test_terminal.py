@@ -49,8 +49,9 @@ def plain_of(terminal: str) -> str:
 def test_a_terminal_shows_the_same_as_a_pipe(tmp_path, monkeypatch):
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("TERM", "xterm-256color")
+    # Equal-length paths: they're in files on the drive, and so in free space.
     piped = story(Env(tmp_path / "pipe"), tty=False)
-    shown = story(Env(tmp_path / "tty"), tty=True)
+    shown = story(Env(tmp_path / "term"), tty=True)
 
     assert "\033[" not in "".join(piped) and "\r" not in "".join(piped)
     assert "\033[31m" in shown[4]  # the deletion in red
