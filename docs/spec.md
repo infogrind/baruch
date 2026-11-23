@@ -409,7 +409,10 @@ details live only in the configuration.
     which has under 1 GiB free.)
 
 01. **Ctrl-C** stops rsync. Units already finished stay recorded, the
-    end-of-run writes happen, and the next run continues.
+    end-of-run writes happen, and the next run continues. Ctrl-C at any
+    other moment (a scan, the question, `verify`'s comparison) stops the
+    command with "Interrupted." and exit code 130, never a Python
+    traceback.
 
 01. **The cache** of a drive always comes from what Baruch itself read from the
     drive: the records in its `units.yaml`, and the contents from its own scan

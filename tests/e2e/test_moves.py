@@ -106,9 +106,9 @@ def test_an_interrupted_prune_never_leaves_a_record_over_deleted_data(env, monke
         raise KeyboardInterrupt
 
     monkeypatch.setattr(commands, "remove_unit", crash)
-    with pytest.raises(KeyboardInterrupt):
-        prune(env, a)
+    r = prune(env, a)
 
+    assert r.code == 130 and r.lines[-1] == "Interrupted."
     assert env.record(a, "tv/Lost") is None  # removed before the data
 
 
