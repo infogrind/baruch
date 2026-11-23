@@ -57,6 +57,15 @@ def tree_size(root: Path) -> int:
     return total
 
 
+class Terminal(io.StringIO):
+    """A stdout that says it's a terminal."""
+
+    encoding = "utf-8"
+
+    def isatty(self) -> bool:
+        return True
+
+
 class FakeNas:
     def __init__(self, root: Path):
         self.root = root
@@ -363,8 +372,11 @@ class Env:
             yaml.safe_dump(doc, sort_keys=False)
         )
 
-    def run(self, *argv: str, answers: str = "", interactive: bool = True) -> Result:
-        stdout = io.StringIO()
+    def run(
+        self, *argv: str, answers: str = "", interactive: bool = True, tty=False
+    ) -> Result:
+        """`tty`: stdout is a terminal (colors, status lines)."""
+        stdout = Terminal() if tty else io.StringIO()
         ctx = Context(
             config_dir=self.config_dir,
             state_dir=self.state_dir,

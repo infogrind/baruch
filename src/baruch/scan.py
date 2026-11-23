@@ -10,6 +10,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -79,6 +80,33 @@ class TreeScan:
     other: list[str] = field(default_factory=list)  # top-level names that aren't units
 
 
+# Called while a scan goes on, with the unit being listed and the files and
+# bytes seen so far: (unit, files, bytes).
+Progress = Callable[[str, int, int], None]
+
+
+@dataclass
+class _Tally:
+    progress: Progress | None
+    unit: str = ""
+    files: int = 0
+    bytes: int = 0
+
+    def start(self, unit: str) -> None:
+        self.unit = unit
+        self.tick()
+
+    def add(self, entry: Entry) -> None:
+        if entry.kind != DIR:
+            self.files += 1
+            self.bytes += entry.size
+        self.tick()
+
+    def tick(self) -> None:
+        if self.progress:
+            self.progress(self.unit, self.files, self.bytes)
+
+
 def excluded(name: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(name, p) for p in patterns)
 
@@ -98,11 +126,17 @@ def _lstat(item: os.DirEntry) -> os.stat_result:
     return item.stat(follow_symlinks=False)
 
 
-def scan_tree(root: Path, exclude: list[str], inner: bool = True) -> TreeScan:
+def scan_tree(
+    root: Path,
+    exclude: list[str],
+    inner: bool = True,
+    progress: Progress | None = None,
+) -> TreeScan:
     """A rule's folder as units. Excluded names are skipped at every depth; on
     a drive (`inner=False`) only at the unit level, so excluded files inside a
     unit are seen and deleted by its sync."""
     out = TreeScan()
+    tally = _Tally(progress)
     inner_exclude = exclude if inner else []
     files_unit = UnitScan(FILES_UNIT)
     try:
@@ -136,17 +170,27 @@ def scan_tree(root: Path, exclude: list[str], inner: bool = True) -> TreeScan:
             )
             files_unit.errors.append((item.name, "reserved name"))
         elif entry.kind == DIR:
+            tally.start(item.name)
             unit = UnitScan(item.name)
             unit.entries[item.name] = entry
-            _walk(Path(item.path), item.name, inner_exclude, unit, out)
+            _walk(Path(item.path), item.name, inner_exclude, unit, out, tally)
             out.units[item.name] = unit
         else:
             files_unit.entries[item.name] = entry
+            tally.unit = FILES_UNIT
+            tally.add(entry)
     out.units[FILES_UNIT] = files_unit
     return out
 
 
-def _walk(path: Path, rel: str, exclude: list[str], unit: UnitScan, out: TreeScan):
+def _walk(
+    path: Path,
+    rel: str,
+    exclude: list[str],
+    unit: UnitScan,
+    out: TreeScan,
+    tally: _Tally | None = None,
+):
     try:
         items = sorted(os.scandir(path), key=lambda e: e.name)
     except OSError as e:
@@ -169,8 +213,10 @@ def _walk(path: Path, rel: str, exclude: list[str], unit: UnitScan, out: TreeSca
             out.special += 1
             continue
         unit.entries[child] = entry
+        if tally:
+            tally.add(entry)
         if entry.kind == DIR:
-            _walk(Path(item.path), child, exclude, unit, out)
+            _walk(Path(item.path), child, exclude, unit, out, tally)
 
 
 def scan_unit(
@@ -225,8 +271,12 @@ class DriveScan:
     errors: list[tuple[str, str]] = field(default_factory=list)
 
 
-def scan_drive(root: Path, exclude: list[str]) -> DriveScan:
+def scan_drive(
+    root: Path, exclude: list[str], progress: Progress | None = None
+) -> DriveScan:
+    """`progress` gets units as `folder/unit`."""
     out = DriveScan()
+    folders = _Folders(progress) if progress else None
     try:
         top = sorted(os.scandir(root), key=lambda e: e.name)
     except OSError as e:
@@ -243,7 +293,30 @@ def scan_drive(root: Path, exclude: list[str]) -> DriveScan:
         if entry is None:
             continue
         if entry.kind == DIR:
-            out.folders[item.name] = scan_tree(Path(item.path), exclude, inner=False)
+            out.folders[item.name] = scan_tree(
+                Path(item.path),
+                exclude,
+                inner=False,
+                progress=folders.folder(item.name) if folders else None,
+            )
         else:
             out.loose[item.name] = entry
     return out
+
+
+class _Folders:
+    """A drive's progress over all its folders: `folder/unit`, and the files
+    and bytes counted across folders."""
+
+    def __init__(self, progress: Progress):
+        self.progress = progress
+        self.base = self.last = (0, 0)
+
+    def folder(self, name: str) -> Progress:
+        self.base = self.last
+
+        def report(unit: str, files: int, size: int) -> None:
+            self.last = (self.base[0] + files, self.base[1] + size)
+            self.progress(f"{name}/{unit}", *self.last)
+
+        return report

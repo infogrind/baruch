@@ -11,7 +11,7 @@ import shutil
 import time
 from pathlib import Path
 
-from baruch import cache, names, planner, records, stale
+from baruch import cache, names, planner, records, stale, style
 from baruch.cache import CacheError, DriveCache
 from baruch.config import MARKER, Config, ConfigError, check, describe, load
 from baruch.context import Context
@@ -40,13 +40,16 @@ from baruch.render import (
     reserve_lines,
     stale_lines,
     start_line,
+    unit_start,
 )
+from baruch.render import text as plain_text
 from baruch.restore import script as restore_script
 from baruch.rsync import DriveError, DriveGone, RsyncError, check_rsync, run_rsync
-from baruch.scan import FILE, DriveScan, TreeScan, scan_drive, scan_tree
+from baruch.scan import FILE, DriveScan, Progress, TreeScan, scan_drive, scan_tree
 from baruch.sizes import count, human
 from baruch.starter import STARTER
-from baruch.timefmt import from_text, show, show_date, to_text
+from baruch.style import Line
+from baruch.timefmt import duration, from_text, show, show_date, to_text
 
 LOG_DAYS = 90
 
@@ -61,19 +64,57 @@ class Fail(Exception):
 
 
 class Out:
+    STATUS_EVERY = 0.2  # seconds between updates of the status line
+
     def __init__(self, ctx: Context):
         self.ctx = ctx
+        self.st = style.for_stream(ctx.stdout)
+        self.live = ctx.stdout.isatty() and os.environ.get("TERM") != "dumb"
+        self._shown = False  # a status line is on the screen
+        self._last = 0.0
 
     def __call__(self, text: str = "") -> None:
-        self.ctx.stdout.write(text + "\n")
+        """A line; a `style.Line` gets its colors on a terminal."""
+        self.clear()
+        self.ctx.stdout.write(self.st.paint(text) + "\n")
 
-    def raw(self, text: str) -> None:
-        self.ctx.stdout.write(text)
+    def lines(self, lines: list[str]) -> None:
+        for line in lines:
+            self(line)
+
+    def status(self, text: str, detail: str = "", force: bool = False) -> None:
+        """A line that's overwritten by the next one, only on a terminal:
+        `text`, then `detail` dimmed. At most every STATUS_EVERY seconds,
+        unless `force`."""
+        if not self.live:
+            return
+        now = time.monotonic()
+        if not force and self._shown and now - self._last < self.STATUS_EVERY:
+            return
+        self._last = now
+        width = shutil.get_terminal_size().columns - 3  # the spinner
+        if len(text) > width:
+            text, detail = text[: max(width - 1, 0)] + "…", ""
+        elif len(text) + 2 + len(detail) > width:
+            detail = ""
+        line = f"{self.st.spinner()} {text}"
+        if detail:
+            line += "  " + self.st.code(style.DIM, detail)
+        self.ctx.stdout.write("\r\033[K" + line)
+        self.ctx.stdout.flush()
+        self._shown = True
+
+    def clear(self) -> None:
+        if self._shown:
+            self.ctx.stdout.write("\r\033[K")
+            self._shown = False
 
     def ask(self, question: str) -> bool:
-        return self.read(f"{question} [y/n] ").strip().lower() in ("y", "yes")
+        prompt = self.st.paint(Line(f"{question} [y/n]", style.QUESTION)) + " "
+        return self.read(prompt).strip().lower() in ("y", "yes")
 
     def read(self, prompt: str) -> str:
+        self.clear()
         self.ctx.stdout.write(prompt)
         self.ctx.stdout.flush()
         answer = self.ctx.stdin.readline()
@@ -157,14 +198,41 @@ def _volumes(found: list[Docked]) -> str:
     return "\n".join(f"  {d.path.name}: {d.reason()}" for d in found)
 
 
-def scan_nas(config: Config) -> dict[str, TreeScan | None]:
-    out: dict[str, TreeScan | None] = {}
+def _scanning(out: Out, what: str) -> Progress:
+    def report(unit: str, files: int, size: int) -> None:
+        many = "file" if files == 1 else "files"
+        out.status(
+            f"{what} · {names.display(unit)}", f"{files:,} {many} · {human(size)}"
+        )
+
+    return report
+
+
+def _units_line(what: str, trees: list[TreeScan]) -> Line:
+    units = [u for t in trees for u in t.units.values() if u.entries]
+    files = sum(u.files for u in units)
+    size = sum(u.size for u in units)
+    return Line(
+        f"{what}: {count(len(units), 'unit')}, {count(files, 'file')}, {human(size)}",
+        style.OK,
+    )
+
+
+def scan_nas(config: Config, out: Out) -> dict[str, TreeScan | None]:
+    """Each rule's source, with a line per rule as it's done."""
+    scans: dict[str, TreeScan | None] = {}
     for rule in config.rules:
         if not (rule.source / MARKER).exists():
-            out[rule.name] = None
-        else:
-            out[rule.name] = scan_tree(rule.source, config.settings.exclude)
-    return out
+            scans[rule.name] = None
+            continue
+        tree = scan_tree(
+            rule.source,
+            config.settings.exclude,
+            progress=_scanning(out, f"Scanning {rule.name}"),
+        )
+        scans[rule.name] = tree
+        out(_units_line(f"Scanned {rule.name}", [tree]))
+    return scans
 
 
 def own_files(ctx: Context) -> list[Path]:
@@ -197,7 +265,9 @@ def load_caches(store: Store, reg: Registry, out: Out | None = None) -> dict:
     return caches
 
 
-def read_drive(config: Config, d: Docked) -> tuple[dict[str, Record], DriveScan]:
+def read_drive(
+    config: Config, d: Docked, out: Out
+) -> tuple[dict[str, Record], DriveScan]:
     try:
         recs = records.read(d.path)
     except RecordsError as e:
@@ -207,7 +277,11 @@ def read_drive(config: Config, d: Docked) -> tuple[dict[str, Record], DriveScan]
             f"backup, until a run syncs it): `baruch drive forget {d.name}`, then "
             f"`baruch drive register {d.name} --force`."
         ) from None
-    return recs, scan_drive(d.path, config.settings.exclude)
+    scan = scan_drive(
+        d.path, config.settings.exclude, _scanning(out, f"Reading {d.name}")
+    )
+    out(_units_line(f"Read {d.name}", list(scan.folders.values())))
+    return recs, scan
 
 
 def drive_state(ctx, config, store, d, recs, scan, now) -> DriveState:
@@ -445,9 +519,9 @@ def cmd_run(ctx: Context, args) -> int:
     except RsyncError as e:
         raise Fail(str(e)) from None
     now = ctx.host.now()
-    recs, disk = read_drive(config, d)
+    recs, disk = read_drive(config, d, out)
     capacity, free = ctx.host.disk_usage(d.path)
-    nas = scan_nas(config)
+    nas = scan_nas(config, out)
     skip = set(args.skip or [])
     _validate_skip(skip, reg, nas)
     caches = load_caches(store, reg, out)  # the docked drive's: as last seen
@@ -465,19 +539,22 @@ def cmd_run(ctx: Context, args) -> int:
         own_state=own_state(ctx, config),
         now=now,
     )
-    text = render_plan(plan, d.path.name)
+    lines = render_plan(plan, d.path.name)
+    out("")
     if args.dry_run:
-        out.raw(text)
-        out.raw(render_summary(plan, None))
+        out.lines(lines)
+        out.lines(render_summary(plan, None))
         out("Dry run: nothing changed.")
         return 0
 
     state = drive_state(ctx, config, store, d, recs, disk, now)
     log = new_log(ctx, d.name)
-    log.write_text(text + render_summary(plan, None), encoding="utf-8")
-    out.raw(text)
+    log.write_text(
+        plain_text(lines) + plain_text(render_summary(plan, None)), encoding="utf-8"
+    )
+    out.lines(lines)
     if plan.needs_answer:
-        out.raw(render_summary(plan, log))
+        out.lines(render_summary(plan, log))
         if not out.ask("Carry out this plan?"):
             state.save_cache()  # it only mirrors the drive
             _append(log, "answered n: nothing changed")
@@ -534,14 +611,26 @@ def _execute(ctx, out, config, config_text, reg, store, state, plan, nas, rsync,
                 total -= op.write_bytes
                 current = None
                 continue
-            out(start_line(i, len(busy), op, done, total, ctx.host.now()))
+            now = ctx.host.now()
+            line = start_line(i, len(busy), op, done, total, now)
+            if out.live:  # one line per unit: shown while it syncs, then replaced
+                out.status(line, force=True)
+            else:
+                out(line)
             started = start_unit(state, op.unit, ctx.host.now()).started
             rule = config.rule(op.rule)
             result = sync_unit(op, d.path, rule.source, rsync)
-            finish_unit(state, op.unit, started, result, ctx.host.now())
+            finished = ctx.host.now()
+            finish_unit(state, op.unit, started, result, finished)
             done += op.write_bytes
             status = "done" if result == OK else "synced with errors"
-            out(f"{names.display(op.unit)}: {status}")
+            took = duration(finished - started)
+            kind = style.OK if result == OK else style.WARN
+            if out.live:
+                head = unit_start(i, len(busy), op, now)
+                out(Line(f"{head}: {status} ({took})", kind))
+            else:
+                out(Line(f"{names.display(op.unit)}: {status} ({took})", kind))
             for m in op.messages + op.errors:
                 out(f"  {names.display(m)}")
             messages.extend(f"{op.unit}: {m}" for m in op.messages + op.errors)
@@ -549,15 +638,20 @@ def _execute(ctx, out, config, config_text, reg, store, state, plan, nas, rsync,
                 left_out[op.unit] = "a folder on the drive can't be read"
             current = None
     except KeyboardInterrupt:
-        out("Interrupted: finished units stay recorded; the next run continues.")
+        out(
+            Line(
+                "Interrupted: finished units stay recorded; the next run continues.",
+                style.FAIL,
+            )
+        )
         code = 130
     except DriveGone as e:
-        out(str(e))
+        out(Line(str(e), style.FAIL))
         code = 1
     except (DriveError, RsyncError, OSError) as e:
         name = names.display(current.unit) + ": " if current else ""
-        out(f"{name}{e}")
-        out("The run stopped for this drive.")
+        out(Line(f"{name}{e}", style.FAIL))
+        out(Line("The run stopped for this drive.", style.FAIL))
         code = 1
     if current is not None:
         left_out[current.unit] = "interrupted"
@@ -577,7 +671,7 @@ def _execute(ctx, out, config, config_text, reg, store, state, plan, nas, rsync,
         for line in stale_lines(items, d.name):
             out(names.display(line))
     if left_out:
-        out("Not complete:")
+        out(Line("Not complete:", style.ATTENTION))
         for u, why in sorted(left_out.items()):
             out(f"  {names.display(u)}: {why}")
     if plan.drive_errors and code == 0:
@@ -586,8 +680,10 @@ def _execute(ctx, out, config, config_text, reg, store, state, plan, nas, rsync,
     _append(log, "\n".join(messages) + f"\nfinished with exit code {code}")
     if items is not None:
         used = entry.capacity - entry.free
-        out(f"{d.name}: {human(used)} used, {human(entry.free)} free.")
-        out("safe to eject in DSM")
+        out(
+            Line(f"{d.name}: {human(used)} used, {human(entry.free)} free.", style.HEAD)
+        )
+        out(Line("Safe to eject in DSM.", style.FINAL))
     return code
 
 
@@ -645,27 +741,39 @@ def cmd_status(ctx: Context, args) -> int:
         if conf:
             total_room += max(0, e.free - reserve)
         out("")
-        out(f"{name}{'' if conf else ' (not in the configuration)'}")
+        out(style.unit(name, "" if conf else " (not in the configuration)"))
         out(
-            f"  last complete run {show(e.last_complete_run)}, "
-            f"last seen {show(e.last_seen)}"
+            Line(
+                f"  last complete run {show(e.last_complete_run)}, "
+                f"last seen {show(e.last_seen)}",
+                style.INFO,
+            )
         )
-        out(f"  oldest unit sync {show(oldest)}, last verify {show(e.last_verify)}")
+        out(
+            Line(
+                f"  oldest unit sync {show(oldest)}, last verify {show(e.last_verify)}",
+                style.INFO,
+            )
+        )
         out(
             f"  {human(e.capacity)} capacity, {human(e.free)} free, reserve "
             f"{human(reserve)}"
             + (f" ({human(used_reserve)} of it used)" if used_reserve else "")
         )
         if e.left_out:
-            out("  the last run wasn't complete:")
+            out(Line("  the last run wasn't complete:", style.CHANGE))
             for u, why in sorted(e.left_out.items()):
                 out(f"    {names.display(u)}: {why}")
         if conf and e.last_seen and now - e.last_seen > config.settings.stale_after:
-            out(f"  not docked for longer than {config.settings.stale_after.days} days")
+            days = config.settings.stale_after.days
+            out(Line(f"  not docked for longer than {days} days", style.CHANGE))
         if e.read_errors:
             out(
-                f"  its last verify found {e.read_errors} read errors: "
-                "consider replacing it"
+                Line(
+                    f"  its last verify found {e.read_errors} read errors: "
+                    "consider replacing it",
+                    style.ERROR,
+                )
             )
         if (
             not conf
@@ -674,7 +782,7 @@ def cmd_status(ctx: Context, args) -> int:
                 u.entries for t in c.contents.folders.values() for u in t.units.values()
             )
         ):
-            out("  still holds data")
+            out(Line("  still holds data", style.CHANGE))
     out("")
     out(f"Free space above the reserves: {human(total_room)}")
 
@@ -682,11 +790,11 @@ def cmd_status(ctx: Context, args) -> int:
     attention = {u: s for u, s in states.items() if s != "in place"}
     if attention:
         out("")
-        out("Units that need attention:")
+        out(Line("Units that need attention:", style.ATTENTION))
         for u, s in sorted(attention.items()):
             home = reg.homes.get(u)
             where = f" (home {home})" if home and s == "copy pending" else ""
-            out(f"  {names.display(u)}: {s}{where}")
+            out(style.unit(f"  {names.display(u)}", f": {s}{where}", style.CHANGE))
     nowhere = [
         u
         for u, s in states.items()
@@ -695,8 +803,12 @@ def cmd_status(ctx: Context, args) -> int:
     if nowhere:
         out("")
         out(
-            f"{count(len(nowhere), 'unit')} {'has' if len(nowhere) == 1 else 'have'} "
-            "no backup (no complete copy on any drive)."
+            Line(
+                f"{count(len(nowhere), 'unit')} "
+                f"{'has' if len(nowhere) == 1 else 'have'} "
+                "no backup (no complete copy on any drive).",
+                style.FAIL,
+            )
         )
     for drive, items in sorted(_read_stale(ctx).items()):
         prune = [i for i in items if i["action"] == stale.PRUNE]
@@ -903,7 +1015,10 @@ def cmd_register(ctx: Context, args) -> int:
             (d.path / BARUCH_DIR / old).unlink(missing_ok=True)
         disk_id = write_label(d.path, name).disk_id
         records.write(d.path, {})
-    scan = scan_drive(d.path, config.settings.exclude)
+    scan = scan_drive(
+        d.path, config.settings.exclude, _scanning(out, f"Reading {name}")
+    )
+    out.clear()
     capacity, free = ctx.host.disk_usage(d.path)
     reg.drives[name] = Drive(disk_id, capacity, free, now)
     cache.save(store.cache_dir, name, DriveCache(disk_id, now, recs, scan))
@@ -972,8 +1087,8 @@ def cmd_prune(ctx: Context, args) -> int:
     d = choose_drive(ctx, out, reg, args.drive)
     assert d.name  # a usable drive is registered
     now = ctx.host.now()
-    recs, disk = read_drive(config, d)
-    nas = scan_nas(config)
+    recs, disk = read_drive(config, d, out)
+    nas = scan_nas(config, out)
     caches = {n: c for n, c in load_caches(store, reg, out).items() if n != d.name}
     items = stale.classify(
         config=config,
@@ -990,25 +1105,36 @@ def cmd_prune(ctx: Context, args) -> int:
     hold = [i for i in items if i.action == stale.HOLD]
     unexplained = [i for i in items if i.action == stale.UNEXPLAINED]
     log = new_log(ctx, f"prune-{d.name}")
-    lines = [f"Prune plan for {d.name} ({d.path.name})", ""]
+    lines: list[str] = [
+        Line(f"Prune plan for {d.name} ({d.path.name})", style.HEAD),
+        "",
+    ]
     for i in prune:
         lines.append(
-            f"  - {names.display(i.path)}: {i.reason}: {count(i.files, 'file')}, "
-            f"{human(i.size)}; {count(i.only_files, 'file')} only here"
+            Line(
+                f"  - {names.display(i.path)}: {i.reason}: "
+                f"{count(i.files, 'file')}, {human(i.size)}; "
+                f"{count(i.only_files, 'file')} only here",
+                style.DELETE,
+            )
         )
         lines.append(f"      ({_where_else(i)})")
     for i in hold:
         lines.append(f"  kept: {names.display(i.path)}: {i.reason}")
     if unexplained:
-        lines.append("Unexplained data, never deleted by Baruch. To delete by hand:")
+        lines.append(
+            Line(
+                "Unexplained data, never deleted by Baruch. To delete by hand:",
+                style.ATTENTION,
+            )
+        )
         for i in unexplained:
             lines.append(f"  {names.display(i.path)}: {i.reason}, {human(i.size)}")
             lines.append(
                 f"    rm -rf -- {names.display(shlex.quote(str(d.path / i.path)))}"
             )
-    text = "\n".join(lines) + "\n"
-    log.write_text(text, encoding="utf-8")
-    out.raw(text)
+    log.write_text(plain_text(lines), encoding="utf-8")
+    out.lines(lines)
     if not prune:
         out("Nothing to prune.")
         end_writes(ctx, out, config, config_text, reg, store, state, nas, now)
@@ -1055,8 +1181,11 @@ def cmd_prune(ctx: Context, args) -> int:
             reg.homes.pop(i.unit, None)
     recs_now, disk_now = (
         records.read(d.path),
-        scan_drive(d.path, config.settings.exclude),
+        scan_drive(
+            d.path, config.settings.exclude, _scanning(out, f"Reading {d.name}")
+        ),
     )
+    out.clear()
     state.records, state.cache.contents = recs_now, disk_now
     state.cache.records = dict(recs_now)
     end_writes(ctx, out, config, config_text, reg, store, state, nas, ctx.host.now())
@@ -1099,9 +1228,9 @@ def cmd_verify(ctx: Context, args) -> int:
     d = choose_drive(ctx, out, reg, args.drive)
     assert d.name  # a usable drive is registered
     now = ctx.host.now()
-    recs, disk = read_drive(config, d)
+    recs, disk = read_drive(config, d, out)
     state = drive_state(ctx, config, store, d, recs, disk, now)
-    nas = scan_nas(config)
+    nas = scan_nas(config, out)
     read_errors: dict[str, list[str]] = {}  # unit -> rels
     changed: list[str] = []
     unclear: list[tuple[Path, Path]] = []

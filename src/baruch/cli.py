@@ -7,9 +7,10 @@ import os
 import sys
 from pathlib import Path
 
-from baruch import commands
+from baruch import commands, style
 from baruch.commands import Fail
 from baruch.context import Context
+from baruch.style import Line
 
 
 def parser() -> argparse.ArgumentParser:
@@ -81,7 +82,11 @@ def main(argv: list[str], ctx: Context) -> int:
     try:
         return args.func(ctx, args)
     except Fail as e:
-        ctx.stdout.write(str(e) + "\n")
+        first, _, rest = str(e).partition("\n")
+        st = style.for_stream(ctx.stdout)
+        ctx.stdout.write(st.paint(Line(first, style.FAIL)) + "\n")
+        if rest:
+            ctx.stdout.write(rest + "\n")
         return e.code
     finally:
         for store in ctx.locks:

@@ -272,7 +272,9 @@ details live only in the configuration.
 
 01. **Confirm.** Before the question, the full plan is saved to the run's log
     file, and a short summary is shown right above the question: the totals
-    per unit (copy / overwrite / delete: files and size), the path of the log
+    per unit (copy / overwrite / delete: files and size, leaving out the
+    ones that are zero) and a `Total:` line for the run that always shows all
+    three, the path of the log
     file, the number of units gone on the NAS whose data a drive still holds,
     per rule ("400 units of rule tv gone on the NAS: nothing is deleted, see
     the plan"; a gone unit without data anywhere is only a registry change),
@@ -336,11 +338,28 @@ details live only in the configuration.
     **Progress:** as each unit with files to copy or delete starts, the run
     prints a line with its place among them, the time (UTC), what it copies
     and deletes, and the bytes copied so far of the run's total
-    (`[3/12] 20:31 home/Photos: copying 1204 files, 48.2 GiB (61.0 GiB of 212.4 GiB copied so far)`); when it finishes, `home/Photos: done` (or
-    "synced with errors", with the files). A unit skipped because it doesn't
+    (`[3/12] 20:31 home/Photos: copying 1204 files, 48.2 GiB (61.0 GiB of 212.4 GiB copied so far)`); when it finishes, `home/Photos: done (2m 51s)` (or
+    "synced with errors", with the files). On a terminal the start line is a
+    status line while the unit syncs, and is then replaced by one line
+    `[3/12] 20:31 home/Photos: copying 1204 files, 48.2 GiB: done (2m 51s)`. A unit skipped because it doesn't
     fit any more is left out of the total. Units with nothing to copy or
     delete only get their new records, without a line. There's no progress
     within a unit.
+
+    Before the plan, reading the drive and scanning each rule's source print a
+    line each when done (`Read BK-6A: 214 units, 88120 files, 1.2 TiB`,
+    `Scanned tv: 870 units, 412003 files, 9.1 TiB`), in `run`, `prune` and
+    `verify`. On a terminal, a status line meanwhile shows the unit being
+    listed and the counts so far; it is overwritten in place and never
+    appears in a pipe, a file or the run's log.
+
+    **Terminal styling:** on a terminal (and unless `NO_COLOR` is set or
+    `TERM` is `dumb`), output gets colors and a few symbols, Homebrew-style:
+    `==>` section headers, green `+`, yellow `~` and red `-` lines, a red
+    deletions section, `⚠` warnings, `✘` errors, `✔` for finished steps, bold
+    unit names and question. ASCII symbols when the locale isn't UTF-8.
+    Styling only adds emphasis: without the escape codes and symbols the text
+    is the same as in a pipe, and the plan file is always plain.
 
 01. **Space:** right before each unit, the fit check is repeated with the
     drive's current free space: the unit's net bytes (what the run would write
@@ -467,8 +486,8 @@ details live only in the configuration.
     the contents list and the `config.yaml` copy too, from the config as read
     at their start.
 
-    The run ends with a summary in the terminal; its last line is "safe to
-    eject in DSM" once everything is written. There are no notifications, and
+    The run ends with a summary in the terminal; its last line is "Safe to
+    eject in DSM." once everything is written. There are no notifications, and
     the drive is not ejected by Baruch. A run is **complete** when every unit
     whose home is the drive, except gone ones, ended with `ok`, or with
     `errors` only for files on the NAS that couldn't be read (listed). A unit

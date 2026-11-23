@@ -45,9 +45,9 @@ def test_a_change_on_the_nas_is_caught(env, monkeypatch):
 
     real = commands.scan_nas
 
-    def touching(config):
+    def touching(config, out):
         env.nas.delete(f"{TV}/Wire/S01E01.mkv")
-        return real(config)
+        return real(config, out)
 
     monkeypatch.setattr(commands, "scan_nas", touching)
     with pytest.raises(SilentLoss, match="changed the NAS"):

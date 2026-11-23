@@ -51,7 +51,7 @@ def test_ctrl_c_records_finished_units_and_the_next_run_continues(env, monkeypat
 
     assert r.code == 130
     assert "Interrupted" in r.out
-    assert r.lines[-1] == "safe to eject in DSM"  # end-of-run writes done
+    assert r.lines[-1] == "Safe to eject in DSM."  # end-of-run writes done
     assert env.record(a, "tv/A").result == "ok"
     # Recorded as interrupted on the drive itself, and in the cache.
     assert env.record(a, "tv/B").result == "in-progress"
@@ -126,7 +126,7 @@ def test_a_run_with_nothing_to_do_still_records_the_drive(env):
     assert r.code == 0
     assert "[y/n]" not in r.out
     assert env.registry()["drives"]["BK-6A"]["last_seen"] != before
-    assert r.lines[-1] == "safe to eject in DSM"
+    assert r.lines[-1] == "Safe to eject in DSM."
 
 
 def test_only_one_command_at_a_time(env):
