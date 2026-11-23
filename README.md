@@ -743,6 +743,15 @@ out. It only syncs and deletes inside the units whose home is this drive.
 | `--drive NAME` | Use this drive when several registered drives are docked (otherwise Baruch asks) |
 | `--skip UNIT` | Leave a unit out of this run; nothing of it changes on the drive. Repeatable; unknown names are refused. |
 
+First `run` reads the drive and scans the NAS, which can take minutes for a
+large archive. On a terminal a status line shows which unit is being listed;
+each finished scan leaves a line:
+
+```
+Read BK-6A: 214 units, 88120 files, 1.2 TiB
+Scanned tv: 870 units, 412003 files, 9.1 TiB
+```
+
 Without a usable drive, `run` lists the mounted USB volumes and why each isn't
 used. Before each unit it checks that the drive is still mounted and its label
 still matches, and stops otherwise. Before it syncs a unit, it marks it as in

@@ -35,6 +35,20 @@ def test_first_run_copies_every_unit_as_first_copy(env):
     assert drive.path("movies/Alien/S01E01.mkv").stat().st_mtime == src.st_mtime
 
 
+def test_the_scans_say_what_they_found(env):
+    drive = setup_movies(env)
+    drive.path("other/x").parent.mkdir(parents=True)
+    drive.path("other/x").write_bytes(b"12345")
+
+    r = env.backup(drive, "", "--dry-run")
+
+    assert r.code == 0, r.out
+    assert "Read BK-20A: 1 unit, 1 file, 5 B" in r.lines
+    assert "Scanned movies: 3 units, 7 files, 5.0 KiB" in r.lines  # with the marker
+    assert r.out.index("Read BK-20A") < r.out.index("Scanned movies")
+    assert "\r" not in r.out and "\033" not in r.out  # not a terminal
+
+
 def test_each_unit_announces_itself_with_where_the_run_stands(env):
     drive = setup_movies(env)
 

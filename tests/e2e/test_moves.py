@@ -243,8 +243,8 @@ def test_prune_keeps_a_gone_unit_that_came_back(env, monkeypatch):
 
     real = commands.scan_nas
 
-    def scan_then_restore(config):
-        out = real(config)
+    def scan_then_restore(config, printer):
+        out = real(config, printer)
         env.nas.add_show(TV, "Wire", episodes=1, size=10)  # back after the plan
         return out
 

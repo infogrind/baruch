@@ -342,6 +342,13 @@ details live only in the configuration.
     delete only get their new records, without a line. There's no progress
     within a unit.
 
+    Before the plan, reading the drive and scanning each rule's source print a
+    line each when done (`Read BK-6A: 214 units, 88120 files, 1.2 TiB`,
+    `Scanned tv: 870 units, 412003 files, 9.1 TiB`), in `run`, `prune` and
+    `verify`. On a terminal, a status line meanwhile shows the unit being
+    listed and the counts so far; it is overwritten in place and never
+    appears in a pipe, a file or the run's log.
+
 01. **Space:** right before each unit, the fit check is repeated with the
     drive's current free space: the unit's net bytes (what the run would write
     less what it would delete) must fit in the free space; existing units may
