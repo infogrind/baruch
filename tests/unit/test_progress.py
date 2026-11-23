@@ -3,14 +3,11 @@
 import io
 from pathlib import Path
 
+from support import Terminal
+
 from baruch.commands import Out
 from baruch.context import Context
 from baruch.scan import scan_drive, scan_tree
-
-
-class Terminal(io.StringIO):
-    def isatty(self) -> bool:
-        return True
 
 
 def out_on(stdout: io.StringIO) -> Out:
@@ -18,16 +15,19 @@ def out_on(stdout: io.StringIO) -> Out:
     return Out(ctx)
 
 
-def test_the_status_line_is_overwritten_and_cleared_before_other_output():
+def test_the_status_line_is_overwritten_and_cleared_before_other_output(
+    monkeypatch,
+):
+    monkeypatch.setenv("NO_COLOR", "1")
     term = Terminal()
     out = out_on(term)
 
-    out.status("Scanning tv: Lost")
-    out.status("Scanning tv: The Wire")  # too soon: skipped
+    out.status("Scanning tv · Lost", "3 files")
+    out.status("Scanning tv · The Wire")  # too soon: skipped
     out("Scanned tv: 2 units")
 
     assert term.getvalue() == (
-        "\r\033[KScanning tv: Lost" + "\r\033[K" + "Scanned tv: 2 units\n"
+        "\r\033[K⠋ Scanning tv · Lost  3 files" + "\r\033[K" + "Scanned tv: 2 units\n"
     )
 
 

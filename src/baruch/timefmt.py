@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 
 def to_text(t: datetime | None) -> str | None:
@@ -29,3 +29,13 @@ def show(t: datetime | None) -> str:
 
 def show_date(t: datetime | None) -> str:
     return "never" if t is None else t.astimezone(UTC).strftime("%Y-%m-%d")
+
+
+def duration(d: timedelta) -> str:
+    """`45s`, `2m 51s`, `3h 05m`."""
+    secs = max(0, int(d.total_seconds()))
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m {secs % 60:02d}s"
+    return f"{secs // 3600}h {secs % 3600 // 60:02d}m"

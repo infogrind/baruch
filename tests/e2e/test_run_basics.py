@@ -28,7 +28,7 @@ def test_first_run_copies_every_unit_as_first_copy(env):
     assert "movies/Heat (1995)" in r.out
     assert "first sync: 3 files" in r.out
     assert "movies/(files)" in r.out
-    assert r.lines[-1] == "safe to eject in DSM"
+    assert r.lines[-1] == "Safe to eject in DSM."
     for rel in ("Heat (1995)/S01E01.mkv", "Alien/S01E02.mkv", "readme.txt"):
         assert drive.read(f"movies/{rel}") == env.nas.read(f"archive/movies/{rel}")
     src = env.nas.path("archive/movies/Alien/S01E01.mkv").stat()
@@ -359,3 +359,15 @@ def test_a_drive_without_records_is_refused_with_the_way_out(env):
     assert r.code != 0
     assert "never takes a drive's records as empty" in r.out
     assert "drive forget BK-20A" in r.out and "--force" in r.out
+
+
+def test_the_summary_leaves_out_zeros_and_ends_with_the_total(env):
+    drive = setup_movies(env)
+    env.backup(drive)
+    env.nas.delete("archive/movies/Alien/S01E01.mkv")
+    env.nas.add("archive/movies/Alien/S01E09.mkv", size=500)
+
+    r = env.backup(drive, "n")
+
+    assert "  movies/Alien: copy 1 (500 B), delete 1 (1000 B)" in r.lines
+    assert "  Total: copy 1 (500 B), overwrite 0 (0 B), delete 1 (1000 B)" in r.lines

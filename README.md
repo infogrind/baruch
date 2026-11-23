@@ -186,7 +186,7 @@ only where they fit completely. About 9 TiB takes roughly a day, so run it in
 tmux. You can stop it with Ctrl-C at any time: finished shows stay recorded,
 and the next run continues.
 
-When the run says "safe to eject in DSM", eject the drive in DSM, dock BK-6B and
+When the run says "Safe to eject in DSM.", eject the drive in DSM, dock BK-6B and
 run again. BK-20A isn't registered yet, so the other rules and the shows that
 fit on neither drive stay *unplaced* for now.
 
@@ -289,7 +289,7 @@ move it. The disk must be ext4.
 1. `baruch run`, ideally in tmux.
 1. Read the plan, especially the deletions and warnings right above the
    question. Answer `y` to carry it out, or `n` to change nothing.
-1. Wait for "safe to eject in DSM", then eject the drive in DSM.
+1. Wait for "Safe to eject in DSM.", then eject the drive in DSM.
 1. Now and then, `baruch status` shows what needs attention: units without a
    backup, drives not docked for longer than `stale_after`, drives growing into
    their reserve, stale data to prune, units gone on the NAS.
@@ -324,7 +324,8 @@ Only a run with neither file operations nor registry changes skips the
 question.
 
 At the end, right above the question, comes a summary: the totals per unit
-(copy / overwrite / delete, in files and bytes), the path of the plan file,
+(copy / overwrite / delete, in files and bytes; zeros left out) and a `Total:`
+line for the run, the path of the plan file,
 which is also the run's log (open it in a second tmux pane for long plans), how
 many units are gone on the NAS while a drive still holds their data ("400
 units of rule tv gone on the NAS: nothing is deleted"), every deletion, and the warnings. A sudden
@@ -757,12 +758,16 @@ used. Before each unit it checks that the drive is still mounted and its label
 still matches, and stops otherwise. Before it syncs a unit, it marks it as in
 progress on the drive itself (and in the NAS's cache), so an interrupted unit
 is never mistaken for a complete one. As each unit starts it prints where the
-run stands, and a line again when the unit is done:
+run stands, and a line again when the unit is done, with how long it took:
 
 ```
 [3/12] 20:31 home/Photos: copying 1204 files, 48.2 GiB (61.0 GiB of 212.4 GiB copied so far)
-home/Photos: done
+home/Photos: done (2m 51s)
 ```
+
+On a terminal the two become one line, and the output has colors and a few
+symbols (`NO_COLOR=1` turns colors off). Piped into a file or `less`, the
+output is plain text, and the plan file always is.
 
 There's no progress within a unit; `df -h` on the drive shows it growing. It
 never deletes a whole unit. Ctrl-C
