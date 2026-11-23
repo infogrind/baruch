@@ -185,6 +185,25 @@ def test_verify_reports_content_that_differs_with_the_same_size_and_time(env):
     assert env.registry()["drives"]["BK-6A"]["last_verify"]
 
 
+def test_verify_says_how_much_it_compared(env, monkeypatch):
+    from baruch.commands import Out
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(Out, "STATUS_EVERY", 0)  # every update
+    setup(env)
+    a = env.register("BK-6A")
+    env.backup(a)
+    env.drives.dock(a)
+
+    r = env.run("verify", answers="")
+    shown = env.run("verify", answers="", tty=True)
+
+    assert "Verified 3 units, 5 files, 29.3 KiB" in r.lines  # with the marker
+    assert r.out.index("Scanned tv") < r.out.index("Verified")
+    assert "Verifying [2/3] tv/Lost" in shown.out  # the status line
+    assert "29.3 KiB of 29.3 KiB" in shown.out
+
+
 def test_verify_reports_files_changed_on_the_nas(env):
     setup(env)
     a = env.register("BK-6A")

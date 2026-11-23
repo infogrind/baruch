@@ -81,6 +81,15 @@ def main(argv: list[str], ctx: Context) -> int:
         return int(e.code or 0)
     try:
         return args.func(ctx, args)
+    except KeyboardInterrupt:
+        # Anywhere else than a run's sync, which reports it itself. On a
+        # terminal, after a new line: the cursor may be behind a question or
+        # a status line, which then stays as where it stopped.
+        st = style.for_stream(ctx.stdout)
+        if ctx.stdout.isatty():
+            ctx.stdout.write("\n")
+        ctx.stdout.write(st.paint(Line("Interrupted.", style.FAIL)) + "\n")
+        return 130
     except Fail as e:
         first, _, rest = str(e).partition("\n")
         st = style.for_stream(ctx.stdout)

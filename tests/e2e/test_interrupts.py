@@ -142,3 +142,26 @@ def test_only_one_command_at_a_time(env):
         assert "Another Baruch command" in r.out
     finally:
         holder.unlock()
+
+
+def test_ctrl_c_outside_a_sync_stops_without_a_traceback(env, monkeypatch):
+    import baruch.commands as commands
+
+    setup(env)
+    a = env.register("BK-6A")
+
+    real = commands.scan_nas
+
+    def interrupted(*args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(commands, "scan_nas", interrupted)
+    env.drives.dock(a)
+
+    r = env.run("run")
+
+    assert r.code == 130
+    assert r.lines[-1] == "Interrupted."
+    assert "Traceback" not in r.out
+    monkeypatch.setattr(commands, "scan_nas", real)
+    assert env.run("run", answers="n").code == 0  # the lock was released

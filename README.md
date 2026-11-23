@@ -665,8 +665,11 @@ NAS, and reports three kinds of mismatch:
   right. It lists both paths and the commands to copy in either direction
   (quoted, safe to paste), and you decide each one.
 
-A full verify reads all of the drive's home units: ~16–25 hours for 8.3 TiB. The status shows
-each drive's last verify.
+A full verify reads all of the drive's home units: ~16–25 hours for 8.3 TiB.
+On a terminal a status line shows how far it is
+(`Verifying [12/870] tv/The Wire  48.2 GiB of 9.1 TiB`); at the end, a line
+says what was compared (`Verified 870 units, 412003 files, 9.1 TiB`). The
+status shows each drive's last verify.
 
 ### Losing Baruch's state
 

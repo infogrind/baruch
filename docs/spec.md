@@ -409,7 +409,10 @@ details live only in the configuration.
     which has under 1 GiB free.)
 
 01. **Ctrl-C** stops rsync. Units already finished stay recorded, the
-    end-of-run writes happen, and the next run continues.
+    end-of-run writes happen, and the next run continues. Ctrl-C at any
+    other moment (a scan, the question, `verify`'s comparison) stops the
+    command with "Interrupted." and exit code 130, never a Python
+    traceback.
 
 01. **The cache** of a drive always comes from what Baruch itself read from the
     drive: the records in its `units.yaml`, and the contents from its own scan
@@ -691,7 +694,12 @@ details live only in the configuration.
     The contents list, cache, restore script, last seen and free space are
     rewritten afterwards. `prune` records last seen and free space too; a run
     answered `n` doesn't. A full verify of a drive's home units takes ~16–25 hours for BK-20A (~8.3 TiB at
-    100–160 MB/s), ~10–17 hours for a full 6 TB drive.
+    100–160 MB/s), ~10–17 hours for a full 6 TB drive. On a terminal, a
+    status line shows the unit being compared, its place among them and the
+    bytes compared so far of the total
+    (`Verifying [12/870] tv/The Wire  48.2 GiB of 9.1 TiB`). When the
+    comparison is done, a line says what it covered
+    (`Verified 870 units, 412003 files, 9.1 TiB`), then come the results.
 
 ## State and unit states
 
